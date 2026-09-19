@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth
+from app.api.routes import auth, knowledge, documents
 
 app = FastAPI(title="Smart Campus RAG", version="1.0.0")
 
@@ -14,6 +14,8 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(knowledge.router)
+app.include_router(documents.router)
 
 
 @app.get("/api/health")
