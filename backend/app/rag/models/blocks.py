@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 
 class BlockType(str, Enum):
@@ -18,7 +19,7 @@ class ContentBlock:
     page_number: int | None = None
     section_title: str | None = None
     source_index: int = 0
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -33,7 +34,7 @@ class DocumentChunkData:
     start_char: int | None = None
     end_char: int | None = None
     token_count: int | None = None
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
