@@ -15,6 +15,9 @@ router = APIRouter(prefix="/api/knowledge-bases", tags=["knowledge"])
 async def list_knowledge_bases(db: AsyncSession = Depends(get_db)):
     service = KnowledgeService(db)
     items = await service.list_all()
+    for item in items:
+        item["created_at"] = item["created_at"].isoformat()
+        item["updated_at"] = item["updated_at"].isoformat()
     return success_response(items)
 
 
