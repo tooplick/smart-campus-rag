@@ -20,23 +20,20 @@ Smart Campus RAG — a campus knowledge base Q&A system using RAG (Retrieval-Aug
 
 ## Common Commands
 
-### Backend (run from project root with venv activated)
+### Backend (run from project root)
 
-```powershell
-# Activate venv (PowerShell)
-.\venv\Scripts\Activate.ps1
-
-# Install dependencies
-pip install -r requirements.txt
+```bash
+# Install dependencies (uv manages .venv automatically)
+uv sync
 
 # Run dev server (port 8000 is occupied on Windows; use 8001)
-uvicorn app.main:app --reload --port 8001
+uv run uvicorn app.main:app --reload --port 8001
 
 # Seed initial admin (admin/admin)
-python scripts/create-admin.py
+uv run python scripts/create-admin.py
 
 # Initialize Qdrant collection (run once after starting Qdrant)
-python scripts/init-qdrant.py
+uv run python scripts/init-qdrant.py
 
 # Run database migrations
 psql -U postgres -d campus_rag -f scripts/migrate-001-add-conversations-and-qa-fields.sql
