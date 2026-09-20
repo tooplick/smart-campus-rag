@@ -1,0 +1,11 @@
+frontend/
+node_modules/
+.git/
+.claude/
+.superpowers/
+.vscode/
+docs/
+venv/
+__pycache__/
+*.pyc
+.env
