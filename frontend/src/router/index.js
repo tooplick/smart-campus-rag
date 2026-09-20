@@ -1,4 +1,13 @@
-import { createRouter, createWebHistory } from 'vue-router'
+﻿import { createRouter, createWebHistory } from 'vue-router'
+
+function isTokenExpired(token) {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return payload.exp ? payload.exp * 1000 < Date.now() : false
+  } catch {
+    return true
+  }
+}
 
 const routes = [
   {
@@ -19,7 +28,9 @@ const routes = [
   {
     path: '/admin',
     component: () => import('@/layouts/AdminLayout.vue'),
+    meta: { requiresAuth: true },
     children: [
+      { path: '', redirect: '/admin/dashboard' },
       { path: 'dashboard', name: 'Dashboard', component: () => import('@/views/admin/Dashboard.vue') },
       { path: 'knowledge-bases', name: 'KnowledgeBases', component: () => import('@/views/admin/KnowledgeBases.vue') },
       { path: 'documents', name: 'Documents', component: () => import('@/views/admin/Documents.vue') },
@@ -33,6 +44,21 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+})
+
+router.beforeEach((to, from, next) => {
+  if (to.matched.some((record) => record.meta.requiresAuth)) {
+    const token = localStorage.getItem('admin_token')
+    if (!token || isTokenExpired(token)) {
+      localStorage.removeItem('admin_token')
+      localStorage.removeItem('admin_user')
+      next({ name: 'AdminLogin' })
+    } else {
+      next()
+    }
+  } else {
+    next()
+  }
 })
 
 export default router

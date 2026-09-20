@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import String, Boolean, DateTime, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,5 +15,5 @@ class SystemConfig(Base):
     is_secret: Mapped[bool] = mapped_column(Boolean, default=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

@@ -1,11 +1,11 @@
-import asyncio
+﻿import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, knowledge, documents, chat
+from app.api.routes import auth, knowledge, documents, chat, conversations, admin, health
 from app.core.config import get_settings
 from app.rag.config import RAGConfig
 from app.rag.embedding.openai_compatible import OpenAICompatibleEmbedding
@@ -25,7 +25,6 @@ worker_task: asyncio.Task | None = None
 
 
 async def _load_rag_config() -> RAGConfig:
-    """Load RAG config from database, falling back to defaults."""
     from app.core.database import async_session
     from app.models.system_config import SystemConfig
     from sqlalchemy import select
@@ -37,8 +36,7 @@ async def _load_rag_config() -> RAGConfig:
                 SystemConfig.config_key.in_([
                     "rag.chunk_size", "rag.chunk_overlap",
                     "rag.candidate_top_k", "rag.final_top_k",
-                    "rag.similarity_threshold", "rag.temperature",
-                    "rag.max_tokens",
+                    "rag.similarity_threshold", "rag.temperature", "rag.max_tokens",
                 ])
             )
             result = await db.execute(stmt)
@@ -54,7 +52,6 @@ async def _load_rag_config() -> RAGConfig:
 
 
 async def _load_model_config(prefix: str) -> dict:
-    """Load model config (base_url, api_key, model) from system_configs."""
     from app.core.database import async_session
     from app.models.system_config import SystemConfig
     from sqlalchemy import select
@@ -78,14 +75,10 @@ async def lifespan(app: FastAPI):
     global rag_pipeline, document_worker, worker_task
 
     try:
-        # Load config
         rag_config = await _load_rag_config()
-
-        # Load model configs
         embedding_cfg = await _load_model_config("embedding")
         llm_cfg = await _load_model_config("llm")
 
-        # Create providers
         embedding = OpenAICompatibleEmbedding(
             base_url=embedding_cfg.get("base_url", ""),
             api_key=embedding_cfg.get("api_key", ""),
@@ -98,14 +91,11 @@ async def lifespan(app: FastAPI):
             model=llm_cfg.get("model", ""),
         )
 
-        # Qdrant client
         qdrant = AsyncQdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY or None)
         retriever = QdrantRetriever(qdrant, "campus_rag_chunks_v1")
 
-        # Pipeline
         rag_pipeline = RAGPipeline(embedding, llm, retriever, rag_config)
 
-        # Worker
         document_worker = DocumentWorker(embedding, retriever, rag_config)
         worker_task = asyncio.create_task(document_worker.run())
 
@@ -115,7 +105,6 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
     if document_worker:
         document_worker.stop()
     if worker_task:
@@ -140,8 +129,6 @@ app.include_router(auth.router)
 app.include_router(knowledge.router)
 app.include_router(documents.router)
 app.include_router(chat.router)
-
-
-@app.get("/api/health")
-async def health_check():
-    return {"status": "ok", "service": "smart-campus-rag"}
+app.include_router(conversations.router)
+app.include_router(admin.router)
+app.include_router(health.router)

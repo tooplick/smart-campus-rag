@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import DateTime, Integer, ForeignKey, Float
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,4 +13,4 @@ class QaSource(Base):
     chunk_id: Mapped[int] = mapped_column(Integer, ForeignKey("document_chunks.id"), nullable=False)
     similarity_score: Mapped[float] = mapped_column(Float, nullable=False)
     source_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

@@ -47,12 +47,14 @@ class RAGPipeline:
         q_vector = q_vectors[0]
 
         # 2. Retrieve
+        retrieval_start = time.monotonic()
         results = await self.retriever.search(
             q_vector,
             knowledge_base_id=knowledge_base_id,
             limit=self.config.candidate_top_k,
             score_threshold=self.config.similarity_threshold,
         )
+        retrieval_elapsed = int((time.monotonic() - retrieval_start) * 1000)
 
         # 3. Final top-k
         results = results[: self.config.final_top_k]
@@ -67,6 +69,10 @@ class RAGPipeline:
                 citations=[],
                 model_name=self.llm.model,
                 latency_ms=elapsed,
+                retrieval_latency_ms=retrieval_elapsed,
+                candidate_top_k=self.config.candidate_top_k,
+                final_top_k=self.config.final_top_k,
+                similarity_threshold=self.config.similarity_threshold,
             )
 
         # 5. Build context
@@ -82,7 +88,12 @@ class RAGPipeline:
                 retrievals=results,
                 citations=[],
                 model_name=self.llm.model,
+                retrieval_latency_ms=retrieval_elapsed,
+                candidate_top_k=self.config.candidate_top_k,
+                final_top_k=self.config.final_top_k,
+                similarity_threshold=self.config.similarity_threshold,
             )
+            llm_start = time.monotonic()
             stream_iter = await self.llm.chat(
                 messages,
                 stream=True,
@@ -97,11 +108,13 @@ class RAGPipeline:
                     yield token
                 rag_answer.answer = "".join(full_answer)
                 rag_answer.citations = await build_citations(db, results)
+                rag_answer.llm_latency_ms = int((time.monotonic() - llm_start) * 1000)
                 rag_answer.latency_ms = int((time.monotonic() - start) * 1000)
 
             return rag_answer, _stream_with_citations()
 
         # Non-streaming
+        llm_start = time.monotonic()
         resp = await self.llm.chat(
             messages,
             stream=False,
@@ -119,6 +132,8 @@ class RAGPipeline:
         citations = await build_citations(db, results)
         elapsed = int((time.monotonic() - start) * 1000)
 
+        llm_elapsed = int((time.monotonic() - llm_start) * 1000)
+
         return RagAnswer(
             answer=answer_text,
             retrievals=results,
@@ -126,4 +141,9 @@ class RAGPipeline:
             model_name=self.llm.model,
             usage=usage,
             latency_ms=elapsed,
+            retrieval_latency_ms=retrieval_elapsed,
+            llm_latency_ms=llm_elapsed,
+            candidate_top_k=self.config.candidate_top_k,
+            final_top_k=self.config.final_top_k,
+            similarity_threshold=self.config.similarity_threshold,
         )

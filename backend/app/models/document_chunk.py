@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import String, DateTime, Integer, Text, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,5 +19,5 @@ class DocumentChunk(Base):
     end_char: Mapped[int | None] = mapped_column(Integer, nullable=True)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     metadata_json: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

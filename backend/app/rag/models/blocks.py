@@ -77,3 +77,8 @@ class RagAnswer:
     model_name: str = ""
     usage: Usage | None = None
     latency_ms: int = 0
+    retrieval_latency_ms: int = 0
+    llm_latency_ms: int = 0
+    candidate_top_k: int = 8
+    final_top_k: int = 5
+    similarity_threshold: float = 0.6

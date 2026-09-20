@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+﻿from pydantic import BaseModel
 from datetime import datetime
 
 
@@ -27,4 +27,10 @@ class DocumentUploadResponse(BaseModel):
     id: int
     filename: str
     status: str
-    message: str
+
+
+class DocumentStatusResponse(BaseModel):
+    id: int
+    status: str
+    progress: int
+    error_message: str | None

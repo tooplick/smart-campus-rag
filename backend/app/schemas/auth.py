@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+﻿from pydantic import BaseModel
 
 
 class LoginRequest(BaseModel):
@@ -6,15 +6,21 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class LoginResponse(BaseModel):
-    token: str
-    must_change_password: bool
+class AdminInfo(BaseModel):
     username: str
 
 
+class LoginResponseData(BaseModel):
+    token: str
+    token_type: str = "Bearer"
+    admin: AdminInfo
+    must_change_password: bool
+
+
 class InitializeRequest(BaseModel):
+    username: str = "admin"
+    current_password: str
     new_password: str
-    new_username: str | None = None
 
 
 class ChangePasswordRequest(BaseModel):

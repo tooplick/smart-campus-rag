@@ -1,7 +1,8 @@
-from app.models.admin import Admin
+﻿from app.models.admin import Admin
 from app.models.knowledge_base import KnowledgeBase
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
+from app.models.conversation import Conversation
 from app.models.qa_record import QaRecord
 from app.models.qa_source import QaSource
 from app.models.system_config import SystemConfig
@@ -11,6 +12,7 @@ __all__ = [
     "KnowledgeBase",
     "Document",
     "DocumentChunk",
+    "Conversation",
     "QaRecord",
     "QaSource",
     "SystemConfig",

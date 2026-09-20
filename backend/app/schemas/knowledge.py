@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+﻿from pydantic import BaseModel
 from datetime import datetime
 
 
@@ -22,8 +22,9 @@ class KnowledgeBaseResponse(BaseModel):
     icon: str | None
     is_enabled: bool
     document_count: int = 0
-    created_at: datetime
-    updated_at: datetime
+    chunk_count: int = 0
+    created_at: str
+    updated_at: str | None = None
 
     class Config:
         from_attributes = True
