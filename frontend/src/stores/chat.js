@@ -55,7 +55,10 @@ export const useChatStore = defineStore('chat', () => {
     const res = await getConversation(id)
     if (res.success) {
       activeConversationId.value = id
-      messages.value = res.data.messages || []
+      messages.value = (res.data.messages || []).map((m) => ({
+        ...m,
+        citations: m.citations || [],
+      }))
       return res.data
     }
     return null
@@ -72,7 +75,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function addMessage(role, content) {
-    messages.value.push({ role, content })
+    messages.value.push({ role, content, citations: [] })
   }
 
   function appendToken(content) {

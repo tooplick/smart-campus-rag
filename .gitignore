@@ -37,3 +37,4 @@ docker-compose.override.yml
 # Docs
 docs/
 CLAUDE.md
+.superpowers/

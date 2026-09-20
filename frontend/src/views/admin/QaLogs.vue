@@ -1,5 +1,5 @@
 <template>
-  <div>
-    <h1 class="text-2xl font-bold">QA Logs</h1>
+  <div class="flex h-full items-center justify-center">
+    <p class="text-muted-foreground">QaLogs — 待实现</p>
   </div>
 </template>
