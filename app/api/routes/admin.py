@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import Request, APIRouter, Depends
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,7 @@ from app.models.document_chunk import DocumentChunk
 from app.models.qa_record import QaRecord
 from app.models.qa_source import QaSource
 from app.models.system_config import SystemConfig
+from app.rag.config import RAGConfig
 from app.schemas.admin import RagConfigUpdate, ModelConfigUpdate
 from app.utils.response import success_response, error_response, paginated_response
 
@@ -87,11 +88,13 @@ async def get_rag_config(
         "chunk_size": 600, "chunk_overlap": 80,
         "candidate_top_k": 8, "final_top_k": 5,
         "similarity_threshold": 0.60, "temperature": 0.2, "max_tokens": 2048,
+        "vector_weight": 0.7, "auto_keywords": 5, "auto_questions": 2,
     }
     stmt = select(SystemConfig).where(
         SystemConfig.config_key.in_([
             "rag.chunk_size", "rag.chunk_overlap", "rag.candidate_top_k",
             "rag.final_top_k", "rag.similarity_threshold", "rag.temperature", "rag.max_tokens",
+            "rag.vector_weight", "rag.auto_keywords", "rag.auto_questions",
         ])
     )
     result = await db.execute(stmt)
@@ -108,6 +111,7 @@ async def get_rag_config(
 @router.put("/rag-config")
 async def update_rag_config(
     req: RagConfigUpdate,
+    request: Request,
     admin: Admin = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -124,8 +128,27 @@ async def update_rag_config(
         return error_response("final_top_k 必须大于0", status_code=422, code="INVALID_FINAL_TOP_K")
     if req.similarity_threshold is not None and not (0 <= req.similarity_threshold <= 1):
         return error_response("similarity_threshold 必须在 0~1 之间", status_code=422, code="INVALID_THRESHOLD")
+    if req.vector_weight is not None and not (0 <= req.vector_weight <= 1):
+        return error_response("vector_weight 必须在 0~1 之间", status_code=422, code="INVALID_VECTOR_WEIGHT")
+    if req.auto_keywords is not None and not (0 <= req.auto_keywords <= 20):
+        return error_response("auto_keywords 必须在 0~20 之间", status_code=422, code="INVALID_AUTO_KEYWORDS")
+    if req.auto_questions is not None and not (0 <= req.auto_questions <= 10):
+        return error_response("auto_questions 必须在 0~10 之间", status_code=422, code="INVALID_AUTO_QUESTIONS")
+    if req.temperature is not None and not (0 <= req.temperature <= 2):
+        return error_response("temperature 必须在 0~2 之间", status_code=422, code="INVALID_TEMPERATURE")
+    if req.max_tokens is not None and not (64 <= req.max_tokens <= 8192):
+        return error_response("max_tokens 必须在 64~8192 之间", status_code=422, code="INVALID_MAX_TOKENS")
 
-    for key, value in req.model_dump(exclude_unset=True).items():
+    updates = req.model_dump(exclude_unset=True)
+
+    # 热更新:把新值同步到运行中的 RAGConfig(管线/worker 共享同一实例),
+    # 保存即生效,无需重启后端
+    live: RAGConfig | None = getattr(request.app.state, "rag_config", None)
+    if live is not None:
+        for key, value in updates.items():
+            setattr(live, key, value)
+
+    for key, value in updates.items():
         config_key = f"rag.{key}"
         value_type = "float" if isinstance(value, float) else "int"
         existing = (await db.execute(
@@ -143,7 +166,7 @@ async def update_rag_config(
 @router.get("/models")
 async def list_models(admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     result = {}
-    for prefix in ["llm", "embedding", "vision"]:
+    for prefix in ["llm", "embedding", "vision", "rerank"]:
         stmt = select(SystemConfig).where(SystemConfig.config_key.in_([
             f"model.{prefix}.base_url", f"model.{prefix}.api_key",
             f"model.{prefix}.model", f"model.{prefix}.enabled",
@@ -168,7 +191,7 @@ async def list_models(admin: Admin = Depends(get_current_admin), db: AsyncSessio
 
 @router.get("/models/{model_type}")
 async def get_model(model_type: str, admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
-    if model_type not in ("llm", "embedding", "vision"):
+    if model_type not in ("llm", "embedding", "vision", "rerank"):
         return error_response("无效的模型类型", status_code=400, code="INVALID_MODEL_TYPE")
     stmt = select(SystemConfig).where(SystemConfig.config_key.in_([
         f"model.{model_type}.base_url", f"model.{model_type}.api_key",
@@ -192,7 +215,7 @@ async def get_model(model_type: str, admin: Admin = Depends(get_current_admin), 
 
 @router.put("/models/{model_type}")
 async def update_model(model_type: str, req: ModelConfigUpdate, admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
-    if model_type not in ("llm", "embedding", "vision"):
+    if model_type not in ("llm", "embedding", "vision", "rerank"):
         return error_response("无效的模型类型", status_code=400, code="INVALID_MODEL_TYPE")
     update_fields = {}
     if req.base_url is not None:
@@ -217,7 +240,7 @@ async def update_model(model_type: str, req: ModelConfigUpdate, admin: Admin = D
 
 @router.post("/models/{model_type}/test")
 async def test_model(model_type: str, admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
-    if model_type not in ("llm", "embedding", "vision"):
+    if model_type not in ("llm", "embedding", "vision", "rerank"):
         return error_response("无效的模型类型", status_code=400, code="INVALID_MODEL_TYPE")
     stmt = select(SystemConfig).where(SystemConfig.config_key.in_([
         f"model.{model_type}.base_url", f"model.{model_type}.api_key", f"model.{model_type}.model",
@@ -236,7 +259,14 @@ async def test_model(model_type: str, admin: Admin = Depends(get_current_admin),
     try:
         start = time.monotonic()
         async with httpx.AsyncClient(timeout=30) as client:
-            if model_type == "embedding":
+            if model_type == "rerank":
+                resp = await client.post(f"{base_url}/rerank",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={"model": model_name, "query": "测试", "documents": ["测试文档一", "测试文档二"], "top_n": 2})
+                resp.raise_for_status()
+                latency = int((time.monotonic() - start) * 1000)
+                return success_response(data={"status": "ok", "model": model_name, "latency_ms": latency, "dimension": None}, message="连接成功")
+            elif model_type == "embedding":
                 resp = await client.post(f"{base_url}/embeddings",
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={"input": "test", "model": model_name})

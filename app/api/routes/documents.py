@@ -3,7 +3,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.api.deps import get_current_admin
+from app.api.deps import get_current_admin, get_retriever
+from app.rag.retriever.qdrant import QdrantRetriever
 from app.models.admin import Admin
 from app.models.document import Document
 from app.models.knowledge_base import KnowledgeBase
@@ -146,6 +147,7 @@ async def delete_document(
     doc_id: int,
     admin: Admin = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
+    retriever: QdrantRetriever | None = Depends(get_retriever),
 ):
     service = DocumentService(db)
     doc = await service.get_by_id(doc_id)
@@ -155,7 +157,7 @@ async def delete_document(
     if doc.status == "processing":
         return error_response("文档正在处理中，请先取消", status_code=409, code="DOC_PROCESSING")
 
-    await service.delete(doc_id)
+    await service.delete(doc_id, retriever=retriever)
     return success_response(message="文档已删除")
 
 

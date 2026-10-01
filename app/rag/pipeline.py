@@ -11,6 +11,9 @@ from app.rag.models.blocks import RagAnswer, RetrievalResult, Usage
 from app.rag.embedding.openai_compatible import OpenAICompatibleEmbedding
 from app.rag.llm.openai_compatible import OpenAICompatibleLLM
 from app.rag.retriever.qdrant import QdrantRetriever
+from app.rag.rerank.base import RerankProvider
+from app.rag.retriever.expand import expand_neighbors
+from app.rag.retriever.keyword import fuse_results, keyword_search
 from app.rag.context.builder import build_context
 from app.rag.prompt.campus_qa import build_messages
 from app.rag.citation.source_builder import build_citations
@@ -25,11 +28,13 @@ class RAGPipeline:
         llm: OpenAICompatibleLLM,
         retriever: QdrantRetriever,
         config: RAGConfig | None = None,
+        rerank: RerankProvider | None = None,
     ):
         self.embedding = embedding
         self.llm = llm
         self.retriever = retriever
         self.config = config or RAGConfig()
+        self.rerank = rerank
 
     async def answer(
         self,
@@ -46,20 +51,37 @@ class RAGPipeline:
         q_vectors = await self.embedding.embed([question])
         q_vector = q_vectors[0]
 
-        # 2. Retrieve
+        # 2. Retrieve:向量 + 关键词两路召回(对齐 RAGFlow 混合检索)
         retrieval_start = time.monotonic()
-        results = await self.retriever.search(
+        dense = await self.retriever.search(
             q_vector,
             knowledge_base_id=knowledge_base_id,
             limit=self.config.candidate_top_k,
-            score_threshold=self.config.similarity_threshold,
+            score_threshold=None,  # 阈值统一在融合后过滤,保留关键词独有命中
         )
+        kw_hits = await keyword_search(db, question, knowledge_base_id, limit=self.config.candidate_top_k)
+        results = fuse_results(dense, kw_hits, vector_weight=self.config.vector_weight)
+        results = [r for r in results if r.score >= self.config.similarity_threshold]
         retrieval_elapsed = int((time.monotonic() - retrieval_start) * 1000)
 
-        # 3. Final top-k
+        # 3. 精排(可选,对齐 RAGFlow 两级排序):重排候选池后截断;失败回退融合排序
+        if self.rerank is not None and len(results) > 1:
+            try:
+                ranked = await self.rerank.rerank(
+                    question, [r.content for r in results], top_n=len(results)
+                )
+                if ranked:
+                    results = [results[i] for i, _ in ranked if 0 <= i < len(results)]
+            except Exception:
+                logger.exception("Rerank failed, falling back to fused order")
+
+        # 4. Final top-k
         results = results[: self.config.final_top_k]
 
-        # 4. No evidence -> refuse
+        # 5. 邻块扩展:补齐命中切片的前后文,跨越 chunk 边界保持连续
+        results = await expand_neighbors(db, results)
+
+        # 6. No evidence -> refuse
         if not results:
             refusal = "知识库中暂未找到足够的相关资料，暂时无法根据现有校园知识库给出可靠答案。"
             elapsed = int((time.monotonic() - start) * 1000)
@@ -81,13 +103,13 @@ class RAGPipeline:
                 return rag_answer, _empty_stream()
             return rag_answer
 
-        # 5. Build context
+        # 7. Build context
         context = build_context(results, max_context_tokens=4000)
 
-        # 6. Build messages
+        # 8. Build messages
         messages = build_messages(context, question, history)
 
-        # 7. Call LLM
+        # 9. Call LLM
         if stream:
             rag_answer = RagAnswer(
                 answer="",

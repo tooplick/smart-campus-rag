@@ -57,3 +57,12 @@ class QdrantRetriever:
             )
             for point in results.points
         ]
+
+    async def delete_points(self, point_ids: list[int]) -> None:
+        """按点 ID 批量删除向量(chunk ID 即点 ID);空列表直接返回,不触达客户端。"""
+        if not point_ids:
+            return
+        await self.client.delete(
+            collection_name=self.collection,
+            points_selector=point_ids,
+        )

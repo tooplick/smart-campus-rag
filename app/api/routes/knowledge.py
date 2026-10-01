@@ -1,12 +1,15 @@
 ﻿from fastapi import APIRouter, Depends
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.api.deps import get_current_admin
+from app.api.deps import get_current_admin, get_retriever
 from app.models.admin import Admin
 from app.models.knowledge_base import KnowledgeBase
 from app.models.document import Document
+from app.models.conversation import Conversation
+from app.rag.retriever.qdrant import QdrantRetriever
+from app.services.document_service import DocumentService
 from app.schemas.knowledge import KnowledgeBaseCreate, KnowledgeBaseUpdate
 from app.utils.response import success_response, error_response, paginated_response
 
@@ -28,6 +31,7 @@ async def _enrich_kb(db: AsyncSession, kb: KnowledgeBase) -> dict:
         "description": kb.description,
         "icon": kb.icon,
         "is_enabled": kb.is_enabled,
+        "chunk_template": kb.chunk_template or "general",
         "document_count": doc_count,
         "chunk_count": chunk_sum,
         "created_at": kb.created_at.isoformat() if kb.created_at else None,
@@ -65,7 +69,8 @@ async def create_knowledge_base(
     admin: Admin = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    kb = KnowledgeBase(name=req.name, description=req.description, icon=req.icon)
+    template = req.chunk_template if req.chunk_template in ("general", "section", "qa", "one") else "general"
+    kb = KnowledgeBase(name=req.name, description=req.description, icon=req.icon, chunk_template=template)
     db.add(kb)
     await db.flush()
     await db.commit()
@@ -101,6 +106,8 @@ async def update_knowledge_base(
         return error_response("知识库不存在", status_code=404, code="KB_NOT_FOUND")
 
     update_data = req.model_dump(exclude_unset=True)
+    if "chunk_template" in update_data and update_data["chunk_template"] not in ("general", "section", "qa", "one"):
+        return error_response("无效的切块模板", status_code=422, code="INVALID_CHUNK_TEMPLATE")
     for key, value in update_data.items():
         setattr(kb, key, value)
 
@@ -113,10 +120,25 @@ async def delete_knowledge_base(
     kb_id: int,
     admin: Admin = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
+    retriever: QdrantRetriever | None = Depends(get_retriever),
 ):
     kb = await db.get(KnowledgeBase, kb_id)
     if not kb:
         return error_response("知识库不存在", status_code=404, code="KB_NOT_FOUND")
+
+    # 其下文档按聚合契约删除:切片/来源引用/向量/物理文件一并清理
+    doc_service = DocumentService(db)
+    docs = await doc_service.list_by_knowledge_base(kb_id)
+    for doc in docs:
+        await doc_service.delete(doc.id, retriever=retriever)
+
+    # 会话与知识库解绑后保留历史(conversations.knowledge_base_id 外键无级联,
+    # 会话是用户数据,不随知识库删除)
+    await db.execute(
+        update(Conversation)
+        .where(Conversation.knowledge_base_id == kb_id)
+        .values(knowledge_base_id=None)
+    )
 
     await db.delete(kb)
     await db.commit()

@@ -34,8 +34,8 @@ class TxtParser(BaseParser):
                         ))
                     buf_lines = []
                 current_title = m.group(2).strip()
-            else:
-                buf_lines.append(line)
+            # 标题行也保留进正文(title+body):只进 section_title 会丢检索词
+            buf_lines.append(line)
 
         if buf_lines:
             content = "".join(buf_lines).strip()

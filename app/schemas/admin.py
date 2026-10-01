@@ -7,6 +7,11 @@ class RagConfigUpdate(BaseModel):
     candidate_top_k: int | None = None
     final_top_k: int | None = None
     similarity_threshold: float | None = None
+    vector_weight: float | None = None
+    auto_keywords: int | None = None
+    auto_questions: int | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 class ModelConfigUpdate(BaseModel):

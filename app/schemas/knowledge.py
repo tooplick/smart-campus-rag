@@ -6,6 +6,7 @@ class KnowledgeBaseCreate(BaseModel):
     name: str
     description: str | None = None
     icon: str | None = None
+    chunk_template: str | None = None  # general/section/qa/one,默认 general
 
 
 class KnowledgeBaseUpdate(BaseModel):
@@ -13,6 +14,7 @@ class KnowledgeBaseUpdate(BaseModel):
     description: str | None = None
     icon: str | None = None
     is_enabled: bool | None = None
+    chunk_template: str | None = None
 
 
 class KnowledgeBaseResponse(BaseModel):
@@ -21,6 +23,7 @@ class KnowledgeBaseResponse(BaseModel):
     description: str | None
     icon: str | None
     is_enabled: bool
+    chunk_template: str = "general"
     document_count: int = 0
     chunk_count: int = 0
     created_at: str
