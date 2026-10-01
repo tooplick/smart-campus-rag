@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// 来源文件卡:同文件的多个来源聚合为一张卡(文件为单位),点击滚动浏览全文
 import { computed, ref } from 'vue'
 import { Download, FileText } from '@lucide/vue'
 import type { Source } from '@/api/types'
@@ -15,17 +16,25 @@ import {
 import { Button } from '@/components/ui/button'
 import SourcePreviewDialog from './SourcePreviewDialog.vue'
 
-const props = defineProps<{ source: Source }>()
-const score = computed(() => `${(props.source.similarity_score * 100).toFixed(0)}%`)
+const props = defineProps<{ documentId: number; filename: string; sources: Source[] }>()
 const previewOpen = ref(false)
 const downloading = ref(false)
 const errorOpen = ref(false)
+
+const score = computed(() => {
+  const max = Math.max(...props.sources.map((s) => s.similarity_score))
+  return `${(max * 100).toFixed(0)}%`
+})
+const pages = computed(() =>
+  [...new Set(props.sources.map((s) => s.page_number).filter((p): p is number => p !== null))]
+    .sort((a, b) => a - b),
+)
 
 async function onDownload() {
   if (downloading.value) return
   downloading.value = true
   try {
-    await downloadDocument(props.source.document_id, props.source.filename)
+    await downloadDocument(props.documentId, props.filename)
   } catch {
     errorOpen.value = true
   } finally {
@@ -45,11 +54,9 @@ async function onDownload() {
   >
     <FileText class="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
     <div class="min-w-0 flex-1">
-      <p class="truncate font-medium">{{ source.filename }}</p>
+      <p class="truncate font-medium">{{ filename }}</p>
       <p class="text-muted-foreground">
-        <span v-if="source.page_number !== null">第 {{ source.page_number }} 页 · </span>
-        <span v-if="source.section_title">{{ source.section_title }} · </span>
-        相似度 {{ score }}
+        含 {{ sources.length }} 个来源<span v-if="pages.length"> · 第 {{ pages.join('、') }} 页</span> · 相似度 {{ score }}
       </p>
     </div>
     <Button
@@ -62,8 +69,12 @@ async function onDownload() {
     >
       <Download />
     </Button>
-    <span class="shrink-0 rounded bg-accent px-1 text-accent-foreground">{{ source.source_order }}</span>
-    <SourcePreviewDialog v-model:open="previewOpen" :source="source" />
+    <SourcePreviewDialog
+      v-model:open="previewOpen"
+      :document-id="documentId"
+      :filename="filename"
+      :count="sources.length"
+    />
     <AlertDialog v-model:open="errorOpen">
       <AlertDialogContent>
         <AlertDialogHeader>

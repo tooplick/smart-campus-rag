@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 1440  # 24 hours
     CONFIG_ENCRYPTION_KEY: str = "change-this-to-a-random-key"
-    FILE_STORAGE_PATH: str = "./backend/uploads"
+    FILE_STORAGE_PATH: str = "./uploads"
 
     class Config:
         env_file = ".env"

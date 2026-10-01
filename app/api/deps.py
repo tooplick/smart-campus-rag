@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models.admin import Admin
+from app.rag.retriever.qdrant import QdrantRetriever
 
 security = HTTPBearer(auto_error=False)
 
@@ -32,3 +33,8 @@ async def get_client_id(request: Request) -> str:
     if not client_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing X-Client-ID header")
     return client_id
+
+
+def get_retriever(request: Request) -> QdrantRetriever | None:
+    """向量检索器:从 app.state 获取(lifespan 装配);未初始化时返回 None,跳过向量清理。"""
+    return getattr(request.app.state, "retriever", None)

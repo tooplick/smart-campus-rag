@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+// 文档管理:按知识库筛选 + 上传 + 状态/进度 + 2 秒轮询 + 重试/取消/删除
+// 状态覆盖:加载骨架 → 错误态(可重试) → 空态;处理中不可删除(对齐后端 409)
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Upload, RotateCcw, X, Trash2, FileText } from '@lucide/vue'
+import { AlertCircle, Upload, RotateCcw, X, Trash2, FileText, RefreshCw } from '@lucide/vue'
 import {
   listDocuments, deleteDocument, reprocessDocument, cancelDocument,
 } from '@/api/documents'
@@ -20,6 +22,8 @@ import {
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import TableSkeleton from '@/components/common/TableSkeleton.vue'
+import Pagination from '@/components/common/Pagination.vue'
 import UploadDialog from '@/components/document/UploadDialog.vue'
 
 const route = useRoute()
@@ -31,16 +35,24 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
+const error = ref('')
+// 首屏数据是否已到达:骨架仅在首屏显示,轮询刷新保持表格稳定
+// (否则每 2 秒整表被骨架替换再换回,视觉上就是闪烁)
+const hasLoaded = ref(false)
+const showSkeleton = computed(() => loading.value && !hasLoaded.value && !error.value)
 
 const uploadOpen = ref(false)
 const deleteTarget = ref<DocFile | null>(null)
 const confirmOpen = ref(false)
+const deleting = ref(false)
 
 let timer: number | null = null
+const polling = computed(() => timer !== null)
 
 /** 加载当前页文档列表 */
 async function load() {
   loading.value = true
+  error.value = ''
   try {
     const paged = await listDocuments({
       knowledge_base_id: kbId.value ?? undefined,
@@ -50,15 +62,17 @@ async function load() {
     items.value = paged.items
     total.value = paged.total
   } catch (e) {
-    toast.error(errorMessage(e))
+    error.value = errorMessage(e)
   } finally {
     loading.value = false
+    hasLoaded.value = true
   }
 }
 
 /** 列表中还有处理中的文档时 2 秒轮询,否则停止 */
 function schedulePoll() {
   if (timer) window.clearTimeout(timer)
+  timer = null
   const hasActive = items.value.some((d) => d.status === 'pending' || d.status === 'processing')
   if (hasActive) timer = window.setTimeout(async () => { await load(); schedulePoll() }, 2000)
 }
@@ -79,6 +93,21 @@ function onKbChange(v: unknown) {
   load().then(schedulePoll)
 }
 
+/** 处理中(processing)文档禁止删除——对齐后端 409「处理中不可删,请先取消」 */
+function cannotDelete(row: DocFile) {
+  return row.status === 'processing'
+}
+
+/** 进度条宽度:待处理按 0% 展示,处理中取后端进度 */
+function progressWidth(row: DocFile) {
+  return (row.status === 'pending' ? 0 : row.progress) + '%'
+}
+
+/** 进度文字:处理中显示百分比 */
+function progressText(row: DocFile) {
+  return row.progress + '%'
+}
+
 /** 重新处理文档 */
 async function onReprocess(row: DocFile) {
   try {
@@ -88,7 +117,7 @@ async function onReprocess(row: DocFile) {
   } catch (e) { toast.error(errorMessage(e)) }
 }
 
-/** 取消处理中的文档 */
+/** 取消处理(后端仅允许 processing 状态取消) */
 async function onCancel(row: DocFile) {
   try {
     await cancelDocument(row.id)
@@ -103,14 +132,19 @@ function askDelete(row: DocFile) {
   confirmOpen.value = true
 }
 
-/** 确认删除文档 */
+/** 确认删除文档(deleting 防止确认按钮连点) */
 async function onConfirmDelete() {
-  if (!deleteTarget.value) return
+  if (!deleteTarget.value || deleting.value) return
+  deleting.value = true
   try {
     await deleteDocument(deleteTarget.value.id)
     toast.success('已删除')
     await load(); schedulePoll()
-  } catch (e) { toast.error(errorMessage(e)) }
+  } catch (e) {
+    toast.error(errorMessage(e))
+  } finally {
+    deleting.value = false
+  }
 }
 </script>
 
@@ -123,7 +157,7 @@ async function onConfirmDelete() {
       </Button>
     </div>
 
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
       <Select :model-value="kbId === null ? 'all' : String(kbId)" @update:model-value="onKbChange">
         <SelectTrigger class="w-56">
           <SelectValue placeholder="全部知识库" />
@@ -134,9 +168,25 @@ async function onConfirmDelete() {
         </SelectContent>
       </Select>
       <p v-if="kbId === null" class="text-sm text-muted-foreground">上传前请先选择目标知识库</p>
+      <!-- 轮询进行中的微标识:让用户知道列表在自动刷新 -->
+      <span v-if="polling" class="flex items-center gap-1 text-xs text-muted-foreground">
+        <RefreshCw class="h-3 w-3 animate-spin" /> 自动刷新中
+      </span>
     </div>
 
-    <Table v-if="items.length">
+    <TableSkeleton v-if="showSkeleton" :rows="5" :cols="7" />
+
+    <EmptyState
+      v-else-if="error"
+      :icon="AlertCircle" variant="error"
+      title="文档列表加载失败" :description="error"
+    >
+      <template #action>
+        <button class="rounded-md border px-4 py-2 text-sm hover:bg-accent" @click="load">重试</button>
+      </template>
+    </EmptyState>
+
+    <Table v-else-if="items.length">
       <TableHeader>
         <TableRow>
           <TableHead>文件名</TableHead>
@@ -150,16 +200,25 @@ async function onConfirmDelete() {
       </TableHeader>
       <TableBody>
         <TableRow v-for="row in items" :key="row.id">
-          <TableCell class="max-w-64 truncate font-medium">{{ row.filename }}</TableCell>
+          <TableCell class="max-w-64 truncate font-medium" :title="row.filename">{{ row.filename }}</TableCell>
           <TableCell>{{ formatFileSize(row.file_size) }}</TableCell>
           <TableCell>{{ row.chunk_count }}</TableCell>
           <TableCell>
             <StatusBadge :status="row.status" />
-            <p v-if="row.error_message" class="mt-1 max-w-48 truncate text-xs text-destructive">{{ row.error_message }}</p>
+            <!-- 错误信息超宽截断,悬浮 title 查看完整内容 -->
+            <p v-if="row.error_message" class="mt-1 max-w-48 truncate text-xs text-destructive" :title="row.error_message">
+              {{ row.error_message }}
+            </p>
           </TableCell>
           <TableCell>
-            <div v-if="row.status === 'processing'" class="h-2 w-24 overflow-hidden rounded bg-muted">
-              <div class="h-2 rounded bg-primary transition-all" :style="{ width: row.progress + '%' }" />
+            <!-- 进度:处理中显示百分比;待处理显示排队中(0%);失败/完成给终值 -->
+            <div v-if="row.status === 'processing' || row.status === 'pending'" class="flex items-center gap-2">
+              <div class="h-2 w-20 overflow-hidden rounded bg-muted">
+                <!-- 宽度平滑补间:轮询拿到新值后线性滑过去,而非跳变 -->
+                <div class="h-2 rounded bg-primary transition-[width] duration-700 ease-out"
+                  :style="{ width: progressWidth(row) }" />
+              </div>
+              <span class="text-xs text-muted-foreground">{{ row.status === 'pending' ? '排队中' : progressText(row) }}</span>
             </div>
             <span v-else class="text-xs text-muted-foreground">{{ row.status === 'completed' ? '100%' : '—' }}</span>
           </TableCell>
@@ -168,23 +227,20 @@ async function onConfirmDelete() {
             <div class="flex justify-end gap-1">
               <Button v-if="row.status === 'failed' || row.status === 'completed'" variant="ghost" size="icon"
                 title="重新处理" @click="onReprocess(row)"><RotateCcw class="h-4 w-4" /></Button>
-              <Button v-if="row.status === 'processing' || row.status === 'pending'" variant="ghost" size="icon"
+              <!-- 取消仅处理中可用(后端对非 processing 取消返回 409) -->
+              <Button v-if="row.status === 'processing'" variant="ghost" size="icon"
                 title="取消处理" @click="onCancel(row)"><X class="h-4 w-4" /></Button>
-              <Button variant="ghost" size="icon" title="删除" @click="askDelete(row)"><Trash2 class="h-4 w-4" /></Button>
+              <Button variant="ghost" size="icon" :disabled="cannotDelete(row)"
+                :title="cannotDelete(row) ? '处理中不可删除,请先取消' : '删除'"
+                @click="askDelete(row)"><Trash2 class="h-4 w-4" /></Button>
             </div>
           </TableCell>
         </TableRow>
       </TableBody>
     </Table>
-    <EmptyState v-else-if="!loading" :icon="FileText" title="暂无文档" description="选择知识库后上传 PDF / DOCX / TXT 文档" />
+    <EmptyState v-else :icon="FileText" title="暂无文档" description="选择知识库后上传文档(Office / 文本 / 网页 / 图片均可)" />
 
-    <div v-if="total > pageSize" class="flex items-center justify-between text-sm text-muted-foreground">
-      <span>共 {{ total }} 条</span>
-      <div class="flex gap-2">
-        <Button variant="outline" size="sm" :disabled="page <= 1" @click="page--; load()">上一页</Button>
-        <Button variant="outline" size="sm" :disabled="page * pageSize >= total" @click="page++; load()">下一页</Button>
-      </div>
-    </div>
+    <Pagination v-model:page="page" :total="total" :page-size="pageSize" @change="load().then(schedulePoll)" />
 
     <UploadDialog v-model:open="uploadOpen" :knowledge-base-id="kbId" @uploaded="load().then(schedulePoll)" />
     <ConfirmDialog v-model:open="confirmOpen" title="删除文档"

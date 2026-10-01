@@ -15,11 +15,13 @@ from app.models.document_chunk import DocumentChunk
 from app.models.knowledge_base import KnowledgeBase
 from app.rag.config import RAGConfig
 from app.rag.models.blocks import DocumentChunkData
-from app.rag.parser.txt import TxtParser
-from app.rag.parser.pdf import PdfParser
+from app.rag.parser.dispatch import get_parser
 from app.rag.chunker.text_chunker import chunk_blocks
 from app.rag.embedding.openai_compatible import OpenAICompatibleEmbedding
+from app.rag.enrichment import embed_text_for, enrich_chunk
+from app.rag.llm.openai_compatible import OpenAICompatibleLLM
 from app.rag.retriever.qdrant import QdrantRetriever
+from app.services.document_service import DocumentService
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +35,14 @@ class DocumentWorker:
         embedding: OpenAICompatibleEmbedding,
         retriever: QdrantRetriever,
         config: RAGConfig | None = None,
+        llm: OpenAICompatibleLLM | None = None,
+        vision_config: dict | None = None,
     ):
         self.embedding = embedding
         self.retriever = retriever
         self.config = config or RAGConfig()
+        self.llm = llm
+        self.vision_config = vision_config
         self._running = False
 
     async def run(self, poll_interval: float = 5.0):
@@ -88,27 +94,40 @@ class DocumentWorker:
 
                 await self._update_status(db, doc, "processing", 10)
 
-                # Parse
+                # Parse:按文件类型分派解析器(图片走 Vision OCR,需已配置 Vision 模型)
                 file_path = Path(doc.storage_path)
-                if doc.file_type == "txt":
-                    parser = TxtParser()
-                elif doc.file_type == "pdf":
-                    parser = PdfParser()
-                else:
-                    raise ValueError(f"Unsupported file type: {doc.file_type}")
-
+                parser = get_parser(doc.file_type, vision_config=self.vision_config)
                 blocks = await parser.parse(file_path)
                 await self._update_status(db, doc, "processing", 30)
 
                 # Chunk
+                # 按知识库配置的切块模板分派(对齐 RAGFlow 模板化切块)
+                kb = await db.get(KnowledgeBase, doc.knowledge_base_id)
+                template = (kb.chunk_template if kb else None) or "general"
                 chunk_data_list = chunk_blocks(
                     blocks,
                     document_id=doc.id,
                     knowledge_base_id=doc.knowledge_base_id,
                     target_size=self.config.chunk_size,
                     overlap=self.config.chunk_overlap,
+                    template=template,
                 )
                 await self._update_status(db, doc, "processing", 40)
+
+                # 记录上一代切片 ID:旧内容保持可检索,待新内容就绪后在换代点原子替换
+                service = DocumentService(db)
+                old_chunk_ids = await service.get_chunk_ids(doc.id)
+
+                # 入库增强(对齐 RAGFlow auto-keywords/auto-questions):失败降级纯正文
+                if self.llm is not None and (self.config.auto_keywords > 0 or self.config.auto_questions > 0):
+                    for cd in chunk_data_list:
+                        meta = await enrich_chunk(
+                            self.llm, cd.content,
+                            keywords=self.config.auto_keywords,
+                            questions=self.config.auto_questions,
+                        )
+                        if meta:
+                            cd.metadata = {**(cd.metadata or {}), **meta}
 
                 # Save chunks to PostgreSQL
                 chunk_models: list[DocumentChunk] = []
@@ -128,10 +147,19 @@ class DocumentWorker:
                     db.add(chunk)
                     chunk_models.append(chunk)
                 await db.flush()
+                # 切片数随 60% 阶段一起可见,前端进度/计数同步更新
+                doc.chunk_count = len(chunk_models)
                 await self._update_status(db, doc, "processing", 60)
 
-                # Embedding
-                texts = [c.content for c in chunk_models]
+                # Embedding:正文 + 增强元数据拼入嵌入文本
+                texts = [
+                    embed_text_for(
+                        c.content,
+                        (c.metadata_json or {}).get("keywords", []),
+                        (c.metadata_json or {}).get("questions", []),
+                    )
+                    for c in chunk_models
+                ]
                 vectors = await self.embedding.embed(texts)
                 await self._update_status(db, doc, "processing", 80)
 
@@ -161,8 +189,11 @@ class DocumentWorker:
                     points=points,
                 )
 
-                # Update document
-                doc.chunk_count = len(chunk_models)
+                # 换代点:新向量已就绪,删除上一代向量与行(行删除与新切片同事务原子提交,
+                # 重建全程旧内容可检索,消除「重新处理期间知识库空窗」)
+                await service.delete_chunks_by_ids(old_chunk_ids, retriever=self.retriever)
+
+                # Update document(chunk_count 已在 60% 阶段记录)
                 doc.status = "completed"
                 doc.progress = 100
                 doc.processed_at = datetime.now(timezone.utc)
@@ -189,6 +220,6 @@ class DocumentWorker:
     async def _update_status(
         self, db: AsyncSession, doc: Document, status: str, progress: int
     ):
-        doc.status = status
-        doc.progress = progress
-        await db.flush()
+        # 委托 DocumentService(即刻提交):阶段进度 10/30/40/60/80 对轮询端实时可见,
+        # 否则整段处理在一个事务里,前端只见到 0 直接跳 100
+        await DocumentService(db).update_status(doc.id, status, progress)

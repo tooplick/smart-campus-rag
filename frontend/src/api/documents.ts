@@ -64,3 +64,20 @@ export async function downloadDocument(documentId: number, filename: string): Pr
   a.click()
   setTimeout(() => URL.revokeObjectURL(url), 100)
 }
+
+/** 原文件内联地址(公开接口):弹层直接展示文件本体,不做拼接 */
+export function documentViewUrl(documentId: number): string {
+  return `/api/files/${documentId}/view`
+}
+
+/** 读取原文件文本(文本类预览用);UTF-8 失败回退 GB18030(校园 CSV 常见) */
+export async function fetchDocumentRawText(documentId: number): Promise<string> {
+  const res = await fetch(documentViewUrl(documentId))
+  if (!res.ok) throw new Error('文件获取失败')
+  const buf = await res.arrayBuffer()
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf)
+  } catch {
+    return new TextDecoder('gb18030').decode(buf)
+  }
+}

@@ -11,6 +11,7 @@ from app.rag.config import RAGConfig
 from app.rag.embedding.openai_compatible import OpenAICompatibleEmbedding
 from app.rag.llm.openai_compatible import OpenAICompatibleLLM
 from app.rag.retriever.qdrant import QdrantRetriever
+from app.rag.rerank.openai_compatible import OpenAICompatibleRerank
 from app.rag.pipeline import RAGPipeline
 from app.services.worker_service import DocumentWorker
 
@@ -37,6 +38,7 @@ async def _load_rag_config() -> RAGConfig:
                     "rag.chunk_size", "rag.chunk_overlap",
                     "rag.candidate_top_k", "rag.final_top_k",
                     "rag.similarity_threshold", "rag.temperature", "rag.max_tokens",
+                    "rag.vector_weight",
                 ])
             )
             result = await db.execute(stmt)
@@ -56,7 +58,7 @@ async def _load_model_config(prefix: str) -> dict:
     from app.models.system_config import SystemConfig
     from sqlalchemy import select
 
-    keys = [f"model.{prefix}.base_url", f"model.{prefix}.api_key", f"model.{prefix}.model"]
+    keys = [f"model.{prefix}.base_url", f"model.{prefix}.api_key", f"model.{prefix}.model", f"model.{prefix}.enabled"]
     result_dict = {}
     try:
         async with async_session() as db:
@@ -93,10 +95,26 @@ async def lifespan(app: FastAPI):
 
         qdrant = AsyncQdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY or None)
         retriever = QdrantRetriever(qdrant, "campus_rag_chunks_v1")
+        app.state.retriever = retriever  # 供文档删除等路由清理向量
 
-        rag_pipeline = RAGPipeline(embedding, llm, retriever, rag_config)
+        # 重排模型可选:启用且配置完整时接入(对齐 RAGFlow 两级排序)
+        rerank_cfg = await _load_model_config("rerank")
+        rerank_provider = None
+        if (rerank_cfg.get("enabled") == "true" and rerank_cfg.get("base_url")
+                and rerank_cfg.get("api_key") and rerank_cfg.get("model")):
+            rerank_provider = OpenAICompatibleRerank(
+                base_url=rerank_cfg["base_url"],
+                api_key=rerank_cfg["api_key"],
+                model=rerank_cfg["model"],
+            )
 
-        document_worker = DocumentWorker(embedding, retriever, rag_config)
+        app.state.rag_config = rag_config  # 与管线/worker 共享实例,rag-config 保存即热更新
+        rag_pipeline = RAGPipeline(embedding, llm, retriever, rag_config, rerank=rerank_provider)
+
+        vision_cfg = await _load_model_config("vision")
+        if vision_cfg.get("enabled") != "true":
+            vision_cfg = None
+        document_worker = DocumentWorker(embedding, retriever, rag_config, llm=llm, vision_config=vision_cfg)
         worker_task = asyncio.create_task(document_worker.run())
 
         logger.info("RAG pipeline and worker started")

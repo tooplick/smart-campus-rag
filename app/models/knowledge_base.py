@@ -13,5 +13,6 @@ class KnowledgeBase(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    chunk_template: Mapped[str] = mapped_column(String(20), default="general")  # 切块模板:general/section/qa/one
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

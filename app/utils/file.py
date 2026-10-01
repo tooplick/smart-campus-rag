@@ -6,11 +6,17 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
+ALLOWED_EXTENSIONS = {
+    ".pdf", ".docx", ".txt", ".md", ".csv", ".xlsx", ".pptx",
+    ".html", ".htm", ".png", ".jpg", ".jpeg",
+}
 ALLOWED_MIME_TYPES = {
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "text/plain",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain", "text/markdown", "text/csv", "text/html",
+    "image/png", "image/jpeg",
 }
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
@@ -50,5 +56,14 @@ def get_mime_type(filename: str) -> str:
         ".pdf": "application/pdf",
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ".txt": "text/plain",
+        ".md": "text/markdown",
+        ".csv": "text/csv",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".html": "text/html",
+        ".htm": "text/html",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
     }
     return mime_map.get(ext, "application/octet-stream")

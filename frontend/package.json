@@ -17,6 +17,7 @@
     "clsx": "^2.1.1",
     "echarts": "^6.1.0",
     "markdown-it": "^15.0.2",
+    "pdfjs-dist": "^6.3.289",
     "pinia": "^4.0.3",
     "reka-ui": "^2.10.5",
     "shadcn-vue": "^2.8.2",

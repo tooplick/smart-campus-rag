@@ -23,6 +23,7 @@ export interface KnowledgeBase {
   description: string | null
   icon: string | null
   is_enabled: boolean
+  chunk_template: string
   document_count: number
   chunk_count: number
   created_at: string
@@ -101,13 +102,16 @@ export interface RagConfig {
   candidate_top_k: number
   final_top_k: number
   similarity_threshold: number
+  vector_weight: number
+  auto_keywords: number
+  auto_questions: number
   temperature: number
   max_tokens: number
 }
 
 /** 模型配置(api_key 不回传,仅标记是否已配置) */
 export interface ModelConfig {
-  type: 'llm' | 'embedding' | 'vision'
+  type: 'llm' | 'embedding' | 'vision' | 'rerank'
   base_url: string
   model: string
   enabled: boolean
