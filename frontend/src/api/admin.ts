@@ -23,7 +23,7 @@ export function saveRagConfig(body: {
 
 /** 获取三类模型配置(不含 api_key 明文) */
 export function fetchModels() {
-  return request.get<unknown, Record<'llm' | 'embedding' | 'vision', Omit<ModelConfig, 'type'>>>(
+  return request.get<unknown, Record<'llm' | 'embedding' | 'vision' | 'rerank', Omit<ModelConfig, 'type'>>>(
     '/admin/models',
   )
 }

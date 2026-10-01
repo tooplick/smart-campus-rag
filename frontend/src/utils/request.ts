@@ -79,10 +79,12 @@ request.interceptors.response.use(
   },
   (err) => {
     if (err.response) {
-      if (err.response.status === 401 && location.pathname.startsWith('/admin')
-        && !location.pathname.includes('login')) {
+      // 401:仅在非公开页(/、/Login、/Initialize 之外)清 token 并跳登录,避免登录页自身 401 造成循环跳转
+      const path = location.pathname.toLowerCase()
+      const isPublicPage = path === '/' || path.startsWith('/login') || path.startsWith('/initialize')
+      if (err.response.status === 401 && !isPublicPage) {
         clearToken()
-        location.href = '/admin/login'
+        location.href = '/Login'
       }
       return Promise.reject(normalizeError(err.response.status, err.response.data))
     }

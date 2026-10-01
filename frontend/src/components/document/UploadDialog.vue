@@ -50,12 +50,12 @@ async function submit() {
         <DialogTitle>上传文档</DialogTitle>
       </DialogHeader>
       <input
-        type="file" multiple accept=".pdf,.docx,.txt"
+        type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx,.html,.htm,.png,.jpg,.jpeg"
         class="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-sm"
         @change="onFileChange"
       />
       <p v-if="files.length" class="text-sm text-muted-foreground">已选 {{ files.length }} 个文件</p>
-      <p v-else class="text-sm text-muted-foreground">支持 PDF / DOCX / TXT,可多选</p>
+      <p v-else class="text-sm text-muted-foreground">支持 PDF / Word / TXT / Markdown / CSV / Excel / PPT / HTML / 图片,可多选</p>
       <DialogFooter>
         <Button variant="outline" @click="open = false">取消</Button>
         <Button :disabled="uploading" @click="submit">{{ uploading ? '上传中…' : '上传' }}</Button>

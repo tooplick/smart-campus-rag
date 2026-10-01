@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+// 知识库管理:列表(分页) + 新建/编辑/启停/删除 + 查看关联文档
+// 状态覆盖:加载骨架 → 错误态(可重试) → 空态;删除确认与启停均有防重复提交
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Plus, Pencil, Trash2, FileText, Database } from '@lucide/vue'
+import { AlertCircle, Plus, Pencil, Trash2, FileText, Database } from '@lucide/vue'
 import * as kbApi from '@/api/knowledge'
 import type { KnowledgeBase } from '@/api/types'
 import { errorMessage } from '@/utils/request'
@@ -15,6 +17,8 @@ import {
 import KbFormDialog from '@/components/knowledge/KbFormDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import TableSkeleton from '@/components/common/TableSkeleton.vue'
+import Pagination from '@/components/common/Pagination.vue'
 
 const router = useRouter()
 const items = ref<KnowledgeBase[]>([])
@@ -22,23 +26,31 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
+const error = ref('')
+// 骨架仅在首屏显示,动作后的重载保持表格稳定(防整表闪烁)
+const hasLoaded = ref(false)
+const showSkeleton = computed(() => loading.value && !hasLoaded.value && !error.value)
 
 const dialogOpen = ref(false)
 const editing = ref<KnowledgeBase | null>(null)
 const deleteTarget = ref<KnowledgeBase | null>(null)
 const confirmOpen = ref(false)
+const deleting = ref(false)
+const togglingId = ref<number | null>(null)
 
 /** 加载当前页知识库列表 */
 async function load() {
   loading.value = true
+  error.value = ''
   try {
     const paged = await kbApi.listKnowledgeBases(page.value, pageSize)
     items.value = paged.items
     total.value = paged.total
   } catch (e) {
-    toast.error(errorMessage(e))
+    error.value = errorMessage(e)
   } finally {
     loading.value = false
+    hasLoaded.value = true
   }
 }
 
@@ -68,13 +80,18 @@ async function onSave(body: { name: string; description?: string; icon?: string 
   }
 }
 
-/** 切换知识库启用状态 */
+/** 切换知识库启用状态(请求期间禁用该行开关防重复) */
 async function onToggleEnabled(row: KnowledgeBase, v: boolean) {
+  if (togglingId.value !== null) return
+  togglingId.value = row.id
   try {
     await kbApi.updateKnowledgeBase(row.id, { is_enabled: v })
     row.is_enabled = v
+    toast.success(v ? '已启用' : '已禁用')
   } catch (e) {
     toast.error(errorMessage(e))
+  } finally {
+    togglingId.value = null
   }
 }
 
@@ -84,21 +101,24 @@ function askDelete(row: KnowledgeBase) {
   confirmOpen.value = true
 }
 
-/** 确认删除知识库 */
+/** 确认删除知识库(deleting 防止确认按钮连点) */
 async function onConfirmDelete() {
-  if (!deleteTarget.value) return
+  if (!deleteTarget.value || deleting.value) return
+  deleting.value = true
   try {
     await kbApi.deleteKnowledgeBase(deleteTarget.value.id)
     toast.success('已删除')
     await load()
   } catch (e) {
     toast.error(errorMessage(e))
+  } finally {
+    deleting.value = false
   }
 }
 
 /** 跳转到该知识库的文档列表 */
 function gotoDocuments(row: KnowledgeBase) {
-  router.push({ path: '/admin/documents', query: { kb: row.id } })
+  router.push({ path: '/Documents', query: { kb: row.id } })
 }
 </script>
 
@@ -109,10 +129,23 @@ function gotoDocuments(row: KnowledgeBase) {
       <Button @click="openCreate"><Plus class="mr-1 h-4 w-4" /> 新建知识库</Button>
     </div>
 
-    <Table v-if="items.length">
+    <TableSkeleton v-if="showSkeleton" :rows="5" :cols="7" />
+
+    <EmptyState
+      v-else-if="error"
+      :icon="AlertCircle" variant="error"
+      title="知识库加载失败" :description="error"
+    >
+      <template #action>
+        <button class="rounded-md border px-4 py-2 text-sm hover:bg-accent" @click="load">重试</button>
+      </template>
+    </EmptyState>
+
+    <Table v-else-if="items.length">
       <TableHeader>
         <TableRow>
           <TableHead>名称</TableHead>
+          <TableHead>描述</TableHead>
           <TableHead>文档数</TableHead>
           <TableHead>Chunk 数</TableHead>
           <TableHead>启用</TableHead>
@@ -123,10 +156,18 @@ function gotoDocuments(row: KnowledgeBase) {
       <TableBody>
         <TableRow v-for="row in items" :key="row.id">
           <TableCell class="font-medium">{{ row.name }}</TableCell>
+          <!-- 描述列:超宽截断,悬浮 title 显示全文 -->
+          <TableCell class="max-w-56 truncate text-muted-foreground" :title="row.description ?? ''">
+            {{ row.description || '—' }}
+          </TableCell>
           <TableCell>{{ row.document_count }}</TableCell>
           <TableCell>{{ row.chunk_count }}</TableCell>
           <TableCell>
-            <Switch :model-value="row.is_enabled" @update:model-value="(v) => onToggleEnabled(row, Boolean(v))" />
+            <Switch
+              :model-value="row.is_enabled"
+              :disabled="togglingId === row.id"
+              @update:model-value="(v) => onToggleEnabled(row, Boolean(v))"
+            />
           </TableCell>
           <TableCell>{{ formatTime(row.updated_at) }}</TableCell>
           <TableCell class="text-right">
@@ -139,15 +180,9 @@ function gotoDocuments(row: KnowledgeBase) {
         </TableRow>
       </TableBody>
     </Table>
-    <EmptyState v-else-if="!loading" :icon="Database" title="暂无知识库" description="点击右上角创建第一个知识库" />
+    <EmptyState v-else :icon="Database" title="暂无知识库" description="点击右上角创建第一个知识库" />
 
-    <div v-if="total > pageSize" class="flex items-center justify-between text-sm text-muted-foreground">
-      <span>共 {{ total }} 条</span>
-      <div class="flex gap-2">
-        <Button variant="outline" size="sm" :disabled="page <= 1" @click="page--; load()">上一页</Button>
-        <Button variant="outline" size="sm" :disabled="page * pageSize >= total" @click="page++; load()">下一页</Button>
-      </div>
-    </div>
+    <Pagination v-model:page="page" :total="total" :page-size="pageSize" @change="load" />
 
     <KbFormDialog v-model:open="dialogOpen" :editing="editing" @save="onSave" />
     <ConfirmDialog v-model:open="confirmOpen" title="删除知识库"

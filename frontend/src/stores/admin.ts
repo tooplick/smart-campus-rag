@@ -6,7 +6,7 @@ import type { DashboardData, RagConfig, ModelConfig, QaLog, QaLogDetail } from '
 export const useAdminStore = defineStore('admin', () => {
   const dashboard = ref<DashboardData | null>(null)
   const ragConfig = ref<RagConfig | null>(null)
-  const models = ref<Record<'llm' | 'embedding' | 'vision', Omit<ModelConfig, 'type'>> | null>(null)
+  const models = ref<Record<'llm' | 'embedding' | 'vision' | 'rerank', Omit<ModelConfig, 'type'>> | null>(null)
   const qaLogs = ref<QaLog[]>([])
   const qaLogDetail = ref<QaLogDetail | null>(null)
 
