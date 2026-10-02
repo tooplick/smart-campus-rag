@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, knowledge, documents, chat, conversations, admin, health, files
+from app.api.routes import auth, knowledge, documents, chat, conversations, admin, health, files, model_profiles
 from app.core.config import get_settings
 from app.rag.config import RAGConfig
 from app.rag.embedding.openai_compatible import OpenAICompatibleEmbedding
@@ -25,51 +25,28 @@ document_worker: DocumentWorker | None = None
 worker_task: asyncio.Task | None = None
 
 
-async def _load_rag_config() -> RAGConfig:
-    from app.core.database import async_session
-    from app.models.system_config import SystemConfig
-    from sqlalchemy import select
+def _load_rag_config() -> RAGConfig:
+    """从 app-config.yaml 装载 RAG 参数(缺项回退 RAGConfig 默认)。"""
+    from app.core.app_config import get_app_config
 
     config = RAGConfig()
     try:
-        async with async_session() as db:
-            stmt = select(SystemConfig).where(
-                SystemConfig.config_key.in_([
-                    "rag.chunk_size", "rag.chunk_overlap",
-                    "rag.candidate_top_k", "rag.final_top_k",
-                    "rag.similarity_threshold", "rag.temperature", "rag.max_tokens",
-                    "rag.vector_weight",
-                ])
-            )
-            result = await db.execute(stmt)
-            for row in result.scalars().all():
-                key = row.config_key.replace("rag.", "")
-                if row.value_type == "int":
-                    setattr(config, key, int(row.config_value))
-                elif row.value_type == "float":
-                    setattr(config, key, float(row.config_value))
+        for key, value in get_app_config().get_rag().items():
+            setattr(config, key, value)
     except Exception:
-        logger.warning("Failed to load RAG config from DB, using defaults")
+        logger.warning("Failed to load RAG config from app-config.yaml, using defaults")
     return config
 
 
-async def _load_model_config(prefix: str) -> dict:
-    from app.core.database import async_session
-    from app.models.system_config import SystemConfig
-    from sqlalchemy import select
+def _load_model_config(prefix: str) -> dict | None:
+    """从 app-config.yaml 取启用配置;未启用返回 None。"""
+    from app.core.app_config import get_app_config
 
-    keys = [f"model.{prefix}.base_url", f"model.{prefix}.api_key", f"model.{prefix}.model", f"model.{prefix}.enabled"]
-    result_dict = {}
     try:
-        async with async_session() as db:
-            stmt = select(SystemConfig).where(SystemConfig.config_key.in_(keys))
-            result = await db.execute(stmt)
-            for row in result.scalars().all():
-                short_key = row.config_key.split(".")[-1]
-                result_dict[short_key] = row.config_value
+        return get_app_config().get_active_profile(prefix)
     except Exception:
-        logger.warning(f"Failed to load {prefix} model config")
-    return result_dict
+        logger.warning(f"Failed to load {prefix} model config from app-config.yaml")
+        return None
 
 
 @asynccontextmanager
@@ -77,20 +54,24 @@ async def lifespan(app: FastAPI):
     global rag_pipeline, document_worker, worker_task
 
     try:
-        rag_config = await _load_rag_config()
-        embedding_cfg = await _load_model_config("embedding")
-        llm_cfg = await _load_model_config("llm")
+        rag_config = _load_rag_config()
+        embedding_cfg = _load_model_config("embedding")
+        llm_cfg = _load_model_config("llm")
+        if not embedding_cfg or not embedding_cfg["base_url"] or not embedding_cfg["model"]:
+            raise RuntimeError("app-config.yaml 缺少可用的 embedding 启用配置")
+        if not llm_cfg or not llm_cfg["base_url"] or not llm_cfg["model"]:
+            raise RuntimeError("app-config.yaml 缺少可用的 llm 启用配置")
 
         embedding = OpenAICompatibleEmbedding(
-            base_url=embedding_cfg.get("base_url", ""),
-            api_key=embedding_cfg.get("api_key", ""),
-            model=embedding_cfg.get("model", ""),
+            base_url=embedding_cfg["base_url"],
+            api_key=embedding_cfg["api_key"],
+            model=embedding_cfg["model"],
             batch_size=rag_config.embedding_batch_size,
         )
         llm = OpenAICompatibleLLM(
-            base_url=llm_cfg.get("base_url", ""),
-            api_key=llm_cfg.get("api_key", ""),
-            model=llm_cfg.get("model", ""),
+            base_url=llm_cfg["base_url"],
+            api_key=llm_cfg["api_key"],
+            model=llm_cfg["model"],
         )
 
         qdrant = AsyncQdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY or None)
@@ -98,24 +79,32 @@ async def lifespan(app: FastAPI):
         app.state.retriever = retriever  # 供文档删除等路由清理向量
 
         # 重排模型可选:启用且配置完整时接入(对齐 RAGFlow 两级排序)
-        rerank_cfg = await _load_model_config("rerank")
+        rerank_profile = _load_model_config("rerank")
         rerank_provider = None
-        if (rerank_cfg.get("enabled") == "true" and rerank_cfg.get("base_url")
-                and rerank_cfg.get("api_key") and rerank_cfg.get("model")):
+        if rerank_profile and rerank_profile["base_url"] and rerank_profile["model"]:
             rerank_provider = OpenAICompatibleRerank(
-                base_url=rerank_cfg["base_url"],
-                api_key=rerank_cfg["api_key"],
-                model=rerank_cfg["model"],
+                base_url=rerank_profile["base_url"],
+                api_key=rerank_profile["api_key"],
+                model=rerank_profile["model"],
             )
 
         app.state.rag_config = rag_config  # 与管线/worker 共享实例,rag-config 保存即热更新
         rag_pipeline = RAGPipeline(embedding, llm, retriever, rag_config, rerank=rerank_provider)
 
-        vision_cfg = await _load_model_config("vision")
-        if vision_cfg.get("enabled") != "true":
-            vision_cfg = None
+        vision_profile = _load_model_config("vision")
+        vision_cfg = None
+        if vision_profile and vision_profile["base_url"] and vision_profile["model"]:
+            vision_cfg = {
+                "base_url": vision_profile["base_url"],
+                "api_key": vision_profile["api_key"],
+                "model": vision_profile["model"],
+            }
         document_worker = DocumentWorker(embedding, retriever, rag_config, llm=llm, vision_config=vision_cfg)
         worker_task = asyncio.create_task(document_worker.run())
+
+        # 供热替换定位实例(model_swap 优先取 app.state,其次回退本模块全局)
+        app.state.rag_pipeline = rag_pipeline
+        app.state.document_worker = document_worker
 
         logger.info("RAG pipeline and worker started")
     except Exception:
@@ -149,5 +138,6 @@ app.include_router(documents.router)
 app.include_router(chat.router)
 app.include_router(conversations.router)
 app.include_router(admin.router)
+app.include_router(model_profiles.router)
 app.include_router(health.router)
 app.include_router(files.router)

@@ -15,9 +15,10 @@ from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
 from app.models.qa_record import QaRecord
 from app.models.qa_source import QaSource
-from app.models.system_config import SystemConfig
+from app.core.app_config import MODEL_TYPES, AppConfigError, AppConfigStore, get_app_config
 from app.rag.config import RAGConfig
-from app.schemas.admin import RagConfigUpdate, ModelConfigUpdate
+from app.schemas.admin import RagConfigUpdate, ModelConfigUpdate, ModelTestRequest
+from app.services.model_swap import OPTIONAL_TYPES, apply_model_change
 from app.utils.response import success_response, error_response, paginated_response
 
 logger = logging.getLogger(__name__)
@@ -82,30 +83,12 @@ async def get_dashboard(
 @router.get("/rag-config")
 async def get_rag_config(
     admin: Admin = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db),
+    store: AppConfigStore = Depends(get_app_config),
 ):
-    defaults = {
-        "chunk_size": 600, "chunk_overlap": 80,
-        "candidate_top_k": 8, "final_top_k": 5,
-        "similarity_threshold": 0.60, "temperature": 0.2, "max_tokens": 2048,
-        "vector_weight": 0.7, "auto_keywords": 5, "auto_questions": 2,
-    }
-    stmt = select(SystemConfig).where(
-        SystemConfig.config_key.in_([
-            "rag.chunk_size", "rag.chunk_overlap", "rag.candidate_top_k",
-            "rag.final_top_k", "rag.similarity_threshold", "rag.temperature", "rag.max_tokens",
-            "rag.vector_weight", "rag.auto_keywords", "rag.auto_questions",
-        ])
-    )
-    result = await db.execute(stmt)
-    for row in result.scalars().all():
-        key = row.config_key.replace("rag.", "")
-        if key in defaults:
-            if row.value_type == "int":
-                defaults[key] = int(row.config_value)
-            elif row.value_type == "float":
-                defaults[key] = float(row.config_value)
-    return success_response(data=defaults)
+    try:
+        return success_response(data=store.get_rag())
+    except AppConfigError as e:
+        return error_response(str(e), status_code=422, code="APP_CONFIG_ERROR")
 
 
 @router.put("/rag-config")
@@ -113,7 +96,7 @@ async def update_rag_config(
     req: RagConfigUpdate,
     request: Request,
     admin: Admin = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db),
+    store: AppConfigStore = Depends(get_app_config),
 ):
     if req.chunk_size is not None and req.chunk_size <= 0:
         return error_response("chunk_size 必须大于0", status_code=422, code="INVALID_CHUNK_SIZE")
@@ -139,123 +122,124 @@ async def update_rag_config(
     if req.max_tokens is not None and not (64 <= req.max_tokens <= 8192):
         return error_response("max_tokens 必须在 64~8192 之间", status_code=422, code="INVALID_MAX_TOKENS")
 
-    updates = req.model_dump(exclude_unset=True)
+    # exclude_none:显式 null(如 {"chunk_size": null})不得绕过上面的范围校验污染运行中配置
+    updates = req.model_dump(exclude_unset=True, exclude_none=True)
 
-    # 热更新:把新值同步到运行中的 RAGConfig(管线/worker 共享同一实例),
-    # 保存即生效,无需重启后端
+    try:
+        saved = store.save_rag(updates)
+    except AppConfigError as e:
+        return error_response(str(e), status_code=422, code="APP_CONFIG_ERROR")
+
+    # 落盘成功后再热更新:避免落盘失败时运行中配置已改、文件未改的分歧窗口
     live: RAGConfig | None = getattr(request.app.state, "rag_config", None)
     if live is not None:
         for key, value in updates.items():
             setattr(live, key, value)
+    return success_response(data=saved)
 
-    for key, value in updates.items():
-        config_key = f"rag.{key}"
-        value_type = "float" if isinstance(value, float) else "int"
-        existing = (await db.execute(
-            select(SystemConfig).where(SystemConfig.config_key == config_key)
-        )).scalar_one_or_none()
-        if existing:
-            existing.config_value = str(value)
-            existing.value_type = value_type
-        else:
-            db.add(SystemConfig(config_key=config_key, config_value=str(value), value_type=value_type))
-    await db.commit()
-    return await get_rag_config(admin=admin, db=db)
+
+def _model_view(store: AppConfigStore, model_type: str) -> dict:
+    """旧端点响应形状:当前启用配置 + api_key_configured(与历史兼容)。
+
+    停用时回退展示已存的 default 配置字段(旧界面仍能看到原配置),
+    enabled=False 表明未启用;完全无配置时字段为空。
+    """
+    active = store.get_active_profile(model_type)
+    view = active
+    if view is None:
+        default = store.list_profiles(model_type)["profiles"].get("default")
+        if default:
+            view = {k: str(default.get(k, "")) for k in ("base_url", "api_key", "model")}
+    return {
+        "type": model_type,
+        "base_url": view["base_url"] if view else "",
+        "model": view["model"] if view else "",
+        "enabled": active is not None,
+        "api_key_configured": bool(view and view["api_key"]),
+    }
 
 
 @router.get("/models")
-async def list_models(admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
-    result = {}
-    for prefix in ["llm", "embedding", "vision", "rerank"]:
-        stmt = select(SystemConfig).where(SystemConfig.config_key.in_([
-            f"model.{prefix}.base_url", f"model.{prefix}.api_key",
-            f"model.{prefix}.model", f"model.{prefix}.enabled",
-        ]))
-        rows = (await db.execute(stmt)).scalars().all()
-        config = {}
-        api_key_configured = False
-        for row in rows:
-            short_key = row.config_key.split(".")[-1]
-            if short_key == "api_key":
-                api_key_configured = bool(row.config_value)
-            else:
-                config[short_key] = row.config_value
-        result[prefix] = {
-            "base_url": config.get("base_url", ""),
-            "model": config.get("model", ""),
-            "enabled": config.get("enabled", "true") == "true",
-            "api_key_configured": api_key_configured,
-        }
-    return success_response(data=result)
+async def list_models(admin: Admin = Depends(get_current_admin), store: AppConfigStore = Depends(get_app_config)):
+    """兼容端点(已废弃,前端设置页上线后下线):返回各类型当前启用配置。"""
+    try:
+        return success_response(data={t: _model_view(store, t) for t in MODEL_TYPES})
+    except AppConfigError as e:
+        return error_response(str(e), status_code=422, code="APP_CONFIG_ERROR")
 
 
 @router.get("/models/{model_type}")
-async def get_model(model_type: str, admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
-    if model_type not in ("llm", "embedding", "vision", "rerank"):
+async def get_model(model_type: str, admin: Admin = Depends(get_current_admin), store: AppConfigStore = Depends(get_app_config)):
+    """兼容端点(已废弃)。"""
+    if model_type not in MODEL_TYPES:
         return error_response("无效的模型类型", status_code=400, code="INVALID_MODEL_TYPE")
-    stmt = select(SystemConfig).where(SystemConfig.config_key.in_([
-        f"model.{model_type}.base_url", f"model.{model_type}.api_key",
-        f"model.{model_type}.model", f"model.{model_type}.enabled",
-    ]))
-    rows = (await db.execute(stmt)).scalars().all()
-    config = {}
-    api_key_configured = False
-    for row in rows:
-        short_key = row.config_key.split(".")[-1]
-        if short_key == "api_key":
-            api_key_configured = bool(row.config_value)
-        else:
-            config[short_key] = row.config_value
-    return success_response(data={
-        "type": model_type, "base_url": config.get("base_url", ""),
-        "model": config.get("model", ""), "enabled": config.get("enabled", "true") == "true",
-        "api_key_configured": api_key_configured,
-    })
+    try:
+        return success_response(data=_model_view(store, model_type))
+    except AppConfigError as e:
+        return error_response(str(e), status_code=422, code="APP_CONFIG_ERROR")
 
 
 @router.put("/models/{model_type}")
-async def update_model(model_type: str, req: ModelConfigUpdate, admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
-    if model_type not in ("llm", "embedding", "vision", "rerank"):
+async def update_model(
+    model_type: str,
+    req: ModelConfigUpdate,
+    request: Request,
+    admin: Admin = Depends(get_current_admin),
+    store: AppConfigStore = Depends(get_app_config),
+):
+    """兼容端点(已废弃):写入该类型的启用配置(无配置时建 default),等价于写配置文件。"""
+    if model_type not in MODEL_TYPES:
         return error_response("无效的模型类型", status_code=400, code="INVALID_MODEL_TYPE")
-    update_fields = {}
-    if req.base_url is not None:
-        update_fields[f"model.{model_type}.base_url"] = (req.base_url, "string")
-    if req.api_key is not None and req.api_key.strip():
-        update_fields[f"model.{model_type}.api_key"] = (req.api_key, "secret")
-    if req.model is not None:
-        update_fields[f"model.{model_type}.model"] = (req.model, "string")
-    if req.enabled is not None:
-        update_fields[f"model.{model_type}.enabled"] = (str(req.enabled).lower(), "string")
-    for config_key, (value, vtype) in update_fields.items():
-        existing = (await db.execute(select(SystemConfig).where(SystemConfig.config_key == config_key))).scalar_one_or_none()
-        if existing:
-            existing.config_value = value
-            if vtype == "secret":
-                existing.is_secret = True
+    if req.enabled is False and model_type not in OPTIONAL_TYPES:
+        return error_response(f"{model_type} 不支持停用", status_code=422, code="CANNOT_DISABLE")
+    try:
+        active = store.get_active_profile(model_type)
+        fields = {k: v for k, v in {
+            "base_url": req.base_url, "api_key": req.api_key, "model": req.model,
+        }.items() if v not in (None, "")}
+        re_enable = req.enabled is not False
+        if active is None:
+            # 停用后再写入:复用既存 default(而非重复 add 触发「配置名已存在」),并按需重新启用
+            if "default" in store.list_profiles(model_type)["profiles"]:
+                if fields:
+                    store.update_profile(model_type, "default", fields)
+            else:
+                store.add_profile(model_type, "default", {
+                    "base_url": req.base_url or "", "api_key": req.api_key or "", "model": req.model or "",
+                })
+            store.set_active(model_type, "default" if re_enable else None)
         else:
-            db.add(SystemConfig(config_key=config_key, config_value=value, is_secret=(vtype == "secret")))
-    await db.commit()
-    return await get_model(model_type=model_type, admin=admin, db=db)
+            if fields:
+                store.update_profile(model_type, active["name"], fields)
+            if not re_enable:
+                store.set_active(model_type, None)
+        apply_model_change(request.app, model_type, store)
+        return success_response(data=_model_view(store, model_type))
+    except AppConfigError as e:
+        return error_response(str(e), status_code=422, code="APP_CONFIG_ERROR")
 
 
 @router.post("/models/{model_type}/test")
-async def test_model(model_type: str, admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
-    if model_type not in ("llm", "embedding", "vision", "rerank"):
+async def test_model(
+    model_type: str,
+    req: ModelTestRequest | None = None,
+    admin: Admin = Depends(get_current_admin),
+    store: AppConfigStore = Depends(get_app_config),
+):
+    """连通性测试:POST body 可选 {name} 测指定配置,缺省测启用配置。"""
+    if model_type not in MODEL_TYPES:
         return error_response("无效的模型类型", status_code=400, code="INVALID_MODEL_TYPE")
-    stmt = select(SystemConfig).where(SystemConfig.config_key.in_([
-        f"model.{model_type}.base_url", f"model.{model_type}.api_key", f"model.{model_type}.model",
-    ]))
-    rows = (await db.execute(stmt)).scalars().all()
-    config = {row.config_key.split(".")[-1]: row.config_value for row in rows}
-    base_url = config.get("base_url", "")
-    api_key = config.get("api_key", "")
-    model_name = config.get("model", "")
-    if not base_url or not api_key or not model_name:
+    try:
+        profile = store.get_profile(model_type, req.name) if req and req.name else store.get_active_profile(model_type)
+    except AppConfigError as e:
+        return error_response(str(e), status_code=422, code="APP_CONFIG_ERROR")
+    if not profile or not profile["base_url"] or not profile["model"]:
         return error_response("模型配置不完整", status_code=400, code="INCOMPLETE_MODEL_CONFIG")
-    # Normalize base_url: ensure it ends with /v1 for OpenAI-compatible APIs
-    base_url = base_url.rstrip("/")
+    base_url = profile["base_url"].rstrip("/")
     if not base_url.endswith("/v1"):
         base_url = f"{base_url}/v1"
+    api_key = profile["api_key"]
+    model_name = profile["model"]
     try:
         start = time.monotonic()
         async with httpx.AsyncClient(timeout=30) as client:

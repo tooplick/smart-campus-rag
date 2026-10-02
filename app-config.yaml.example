@@ -1,0 +1,35 @@
+# 应用配置文件模板:复制为 app-config.yaml 并填写真实配置(app-config.yaml 已入 .gitignore)
+# 配置的增删改可通过设置页完成,也可直接手编本文件(重新加载即生效)
+# api_key 明文落盘,注意文件权限
+models:
+  llm:
+    active: mimo              # 当前启用的配置名;null = 停用(rerank/vision 可停用)
+    profiles:
+      mimo:
+        base_url: https://token-plan-cn.xiaomimimo.com
+        api_key: "sk-xxx"
+        model: mimo-v2.6-flash
+  embedding:
+    active: bge-local
+    profiles:
+      bge-local:
+        base_url: http://localhost:8080   # 本地 llama.cpp bge-m3,见 scripts/start-embedding-server.ps1
+        api_key: "-"
+        model: bge-m3
+  rerank:
+    active: null
+    profiles: {}
+  vision:
+    active: null
+    profiles: {}
+rag:
+  chunk_size: 600
+  chunk_overlap: 80
+  candidate_top_k: 8
+  final_top_k: 5
+  similarity_threshold: 0.6
+  vector_weight: 0.7
+  auto_keywords: 5
+  auto_questions: 2
+  temperature: 0.2
+  max_tokens: 2048

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 1440  # 24 hours
     CONFIG_ENCRYPTION_KEY: str = "change-this-to-a-random-key"
     FILE_STORAGE_PATH: str = "./uploads"
+    APP_CONFIG_PATH: str = "./app-config.yaml"
 
     class Config:
         env_file = ".env"
