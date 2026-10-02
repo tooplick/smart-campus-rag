@@ -14,12 +14,5 @@ class RagConfigUpdate(BaseModel):
     max_tokens: int | None = None
 
 
-class ModelConfigUpdate(BaseModel):
-    base_url: str | None = None
-    api_key: str | None = None
-    model: str | None = None
-    enabled: bool | None = None
-
-
 class ModelTestRequest(BaseModel):
     name: str | None = None  # 指定配置名;缺省测当前启用配置

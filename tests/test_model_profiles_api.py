@@ -1,4 +1,4 @@
-"""模型配置 API 测试:CRUD / 切换启用 / 旧端点文件适配。
+"""模型配置 API 测试:CRUD / 切换启用 / 连通性测试(旧 /models 端点已下线)。
 
 无需 pytest,可直接运行::
 
@@ -98,38 +98,6 @@ def test_incomplete_first_profile_rejected():
         # 补全后可创建并自动启用
         r = c.post("/api/admin/model-profiles", json={"type": "rerank", "name": "r", "base_url": "https://r", "model": "rm"})
         assert r.json()["success"] and r.json()["data"]["active"] == "r", r.text
-
-
-def test_legacy_models_endpoints_write_file():
-    """旧 GET/PUT /models/{type} 读写配置文件(适配器,Plan 2 下线)。"""
-    with tempfile.TemporaryDirectory() as tmp:
-        c = _client(tmp)
-        r = c.put("/api/admin/models/llm", json={"base_url": "https://legacy", "api_key": "sk-l", "model": "lm1"})
-        assert r.json()["success"], r.text
-        r = c.get("/api/admin/models/llm")
-        data = r.json()["data"]
-        assert data["base_url"] == "https://legacy" and data["model"] == "lm1", data
-        assert data["api_key_configured"] is True
-
-
-def test_legacy_disable_reenable_flow():
-    """旧端点:停用后再次写入不得因 default 已存在而 422;停用态仍展示已存字段。"""
-    with tempfile.TemporaryDirectory() as tmp:
-        c = _client(tmp)
-        # 首次写入:建 default 并启用
-        r = c.put("/api/admin/models/rerank", json={"base_url": "https://r", "api_key": "k", "model": "rm"})
-        assert r.json()["data"]["enabled"] is True, r.text
-        # 停用
-        r = c.put("/api/admin/models/rerank", json={"enabled": False})
-        assert r.json()["success"] and r.json()["data"]["enabled"] is False, r.text
-        # 停用态仍能看到已存 default 字段
-        assert r.json()["data"]["base_url"] == "https://r", r.json()["data"]
-        assert r.json()["data"]["api_key_configured"] is True
-        # 重新写入并启用:不得 422「配置名已存在」
-        r = c.put("/api/admin/models/rerank", json={"base_url": "https://r2", "api_key": "k", "model": "rm2"})
-        assert r.json()["success"], r.text
-        assert r.json()["data"]["enabled"] is True
-        assert r.json()["data"]["base_url"] == "https://r2" and r.json()["data"]["model"] == "rm2"
 
 
 def test_api_triggers_swap():
@@ -253,8 +221,6 @@ def main() -> int:
         test_crud_and_active_flow,
         test_embed_llm_cannot_disable,
         test_incomplete_first_profile_rejected,
-        test_legacy_models_endpoints_write_file,
-        test_legacy_disable_reenable_flow,
         test_api_triggers_swap,
         test_swap_falls_back_to_main_globals,
         test_test_endpoint_uses_named_profile,

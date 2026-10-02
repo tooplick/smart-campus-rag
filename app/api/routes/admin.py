@@ -17,8 +17,7 @@ from app.models.qa_record import QaRecord
 from app.models.qa_source import QaSource
 from app.core.app_config import MODEL_TYPES, AppConfigError, AppConfigStore, get_app_config
 from app.rag.config import RAGConfig
-from app.schemas.admin import RagConfigUpdate, ModelConfigUpdate, ModelTestRequest
-from app.services.model_swap import OPTIONAL_TYPES, apply_model_change
+from app.schemas.admin import RagConfigUpdate, ModelTestRequest
 from app.utils.response import success_response, error_response, paginated_response
 
 logger = logging.getLogger(__name__)
@@ -138,87 +137,8 @@ async def update_rag_config(
     return success_response(data=saved)
 
 
-def _model_view(store: AppConfigStore, model_type: str) -> dict:
-    """旧端点响应形状:当前启用配置 + api_key_configured(与历史兼容)。
-
-    停用时回退展示已存的 default 配置字段(旧界面仍能看到原配置),
-    enabled=False 表明未启用;完全无配置时字段为空。
-    """
-    active = store.get_active_profile(model_type)
-    view = active
-    if view is None:
-        default = store.list_profiles(model_type)["profiles"].get("default")
-        if default:
-            view = {k: str(default.get(k, "")) for k in ("base_url", "api_key", "model")}
-    return {
-        "type": model_type,
-        "base_url": view["base_url"] if view else "",
-        "model": view["model"] if view else "",
-        "enabled": active is not None,
-        "api_key_configured": bool(view and view["api_key"]),
-    }
-
-
-@router.get("/models")
-async def list_models(admin: Admin = Depends(get_current_admin), store: AppConfigStore = Depends(get_app_config)):
-    """兼容端点(已废弃,前端设置页上线后下线):返回各类型当前启用配置。"""
-    try:
-        return success_response(data={t: _model_view(store, t) for t in MODEL_TYPES})
-    except AppConfigError as e:
-        return error_response(str(e), status_code=422, code="APP_CONFIG_ERROR")
-
-
-@router.get("/models/{model_type}")
-async def get_model(model_type: str, admin: Admin = Depends(get_current_admin), store: AppConfigStore = Depends(get_app_config)):
-    """兼容端点(已废弃)。"""
-    if model_type not in MODEL_TYPES:
-        return error_response("无效的模型类型", status_code=400, code="INVALID_MODEL_TYPE")
-    try:
-        return success_response(data=_model_view(store, model_type))
-    except AppConfigError as e:
-        return error_response(str(e), status_code=422, code="APP_CONFIG_ERROR")
-
-
-@router.put("/models/{model_type}")
-async def update_model(
-    model_type: str,
-    req: ModelConfigUpdate,
-    request: Request,
-    admin: Admin = Depends(get_current_admin),
-    store: AppConfigStore = Depends(get_app_config),
-):
-    """兼容端点(已废弃):写入该类型的启用配置(无配置时建 default),等价于写配置文件。"""
-    if model_type not in MODEL_TYPES:
-        return error_response("无效的模型类型", status_code=400, code="INVALID_MODEL_TYPE")
-    if req.enabled is False and model_type not in OPTIONAL_TYPES:
-        return error_response(f"{model_type} 不支持停用", status_code=422, code="CANNOT_DISABLE")
-    try:
-        active = store.get_active_profile(model_type)
-        fields = {k: v for k, v in {
-            "base_url": req.base_url, "api_key": req.api_key, "model": req.model,
-        }.items() if v not in (None, "")}
-        re_enable = req.enabled is not False
-        if active is None:
-            # 停用后再写入:复用既存 default(而非重复 add 触发「配置名已存在」),并按需重新启用
-            if "default" in store.list_profiles(model_type)["profiles"]:
-                if fields:
-                    store.update_profile(model_type, "default", fields)
-            else:
-                store.add_profile(model_type, "default", {
-                    "base_url": req.base_url or "", "api_key": req.api_key or "", "model": req.model or "",
-                })
-            store.set_active(model_type, "default" if re_enable else None)
-        else:
-            if fields:
-                store.update_profile(model_type, active["name"], fields)
-            if not re_enable:
-                store.set_active(model_type, None)
-        apply_model_change(request.app, model_type, store)
-        return success_response(data=_model_view(store, model_type))
-    except AppConfigError as e:
-        return error_response(str(e), status_code=422, code="APP_CONFIG_ERROR")
-
-
+# 旧 GET/PUT /models(/{type}) 兼容端点已下线(前端设置页改用 /model-profiles CRUD);
+# 仅保留连通性测试端点,支持指定 profile(缺省测启用配置)。
 @router.post("/models/{model_type}/test")
 async def test_model(
     model_type: str,

@@ -3,4 +3,4 @@ from app.schemas.chat import ChatRequest
 from app.schemas.conversation import ConversationCreate, ConversationUpdate
 from app.schemas.document import DocumentResponse, DocumentUploadResponse, DocumentStatusResponse
 from app.schemas.knowledge import KnowledgeBaseCreate, KnowledgeBaseUpdate, KnowledgeBaseResponse
-from app.schemas.admin import RagConfigUpdate, ModelConfigUpdate, ModelTestRequest
+from app.schemas.admin import RagConfigUpdate, ModelTestRequest

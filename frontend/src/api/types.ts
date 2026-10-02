@@ -109,15 +109,6 @@ export interface RagConfig {
   max_tokens: number
 }
 
-/** 模型配置(api_key 不回传,仅标记是否已配置) */
-export interface ModelConfig {
-  type: 'llm' | 'embedding' | 'vision' | 'rerank'
-  base_url: string
-  model: string
-  enabled: boolean
-  api_key_configured: boolean
-}
-
 /** 模型连通性测试结果 */
 export interface ModelTestResult {
   status: 'ok' | 'error'
@@ -125,6 +116,25 @@ export interface ModelTestResult {
   latency_ms: number | null
   dimension: number | null
 }
+
+/** 单个模型配置(api_key 不回传,仅标记是否已配置) */
+export interface ModelProfile {
+  base_url: string
+  model: string
+  api_key_configured: boolean
+}
+
+/** 单类型( llm/embedding/vision/rerank)的配置组:启用指针 + 配置清单 */
+export interface ModelProfileGroup {
+  active: string | null
+  profiles: Record<string, ModelProfile>
+}
+
+/** 四类模型的配置总览 */
+export type ModelProfiles = Record<ModelType, ModelProfileGroup>
+
+/** 模型类型 */
+export type ModelType = 'llm' | 'embedding' | 'vision' | 'rerank'
 
 /** QA 日志(列表用) */
 export interface QaLog {

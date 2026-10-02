@@ -61,8 +61,12 @@ npm run test     # vitest
 ### Docker
 
 ```bash
+# 仅依赖容器(开发:后端/前端本机跑)
 docker compose up -d postgres qdrant
 docker compose exec postgres psql -U postgres -d campus_rag
+
+# 全栈容器(生产形态:backend:8000 / frontend:5173 / nginx:80,nginx 反代见 deploy/nginx/nginx.conf)
+docker compose up -d --build
 ```
 
 ### 配置文件
@@ -103,6 +107,8 @@ RAG Pipeline (app/rag/) — 解析/切块/嵌入/检索/重排/LLM
 外部: PostgreSQL / Qdrant / OpenAI 兼容模型
 ```
 
+横切模块:`app/core/app_config.py`(app-config.yaml 存储:模型 profile / RAG 参数)、`app/services/model_swap.py`(切换启用配置时热替换 Provider)。
+
 ### RAG 模块结构(`app/rag/`)
 
 ```
@@ -124,7 +130,7 @@ context|prompt|citation/ [来源 N] 上下文、校园 QA 提示词、回查文�
 问题 → 向量化
 → 向量检索 + 关键词检索(各取 candidate_top_k;向量路不设阈值)
 → 融合排序(vector_weight=0.7,单路命中保持原分)→ 按 similarity_threshold 过滤
-→ 可选重排(启用 model.rerank 时,失败回退融合序)→ 截断 final_top_k
+→ 可选重排(app-config.yaml 启用 rerank 配置时,失败回退融合序)→ 截断 final_top_k
 → 邻块扩展(同文档前后各 1 块,补跨 chunk 断文)→ [来源 N] 上下文(≤4000 token)
 → LLM → 回答 + 引用;无证据则拒答
 ```
@@ -159,7 +165,7 @@ context|prompt|citation/ [来源 N] 上下文、校园 QA 提示词、回查文�
 - `/api/auth`: login / initialize(首次强制改密)/ me / logout / change-password
 - `/api/knowledge-bases` CRUD;`/api/documents` CRUD + `/{id}/status` + `/{id}/reprocess`
 - `/api/files/{id}` 下载、`/api/files/{id}/view` 内联预览(公开,聊天来源弹层直出原文件)
-- `/api/admin`(JWT): dashboard / rag-config(读写 `app-config.yaml`)/ model-profiles(多套配置 CRUD + 启用切换)/ models/{llm|embedding|vision|rerank} + test(旧端点文件适配器,前端设置页上线后下线)/ qa-logs
+- `/api/admin`(JWT): dashboard / rag-config(读写 `app-config.yaml`)/ model-profiles(多套配置 CRUD + 启用切换)/ models/{type}/test(连通性测试,可选 `{name}` 指定配置;旧 GET/PUT `/models` 已下线)/ qa-logs
 - `/api/health` 存活、`/api/ready` 就绪(PostgreSQL/Qdrant/LLM/Embedding)
 
 ### 关键模式
@@ -182,12 +188,19 @@ context|prompt|citation/ [来源 N] 上下文、校园 QA 提示词、回查文�
 ```
 api/         admin.ts auth.ts chat.ts documents.ts knowledge.ts types.ts
 utils/       request.ts(axios + jsonFetch 双轨,错误归一化) sse.ts stream-chat.ts format.ts auth.ts
+             guard.ts(路由守卫纯函数) docs.ts / markdown.ts(Docs 页) sidebar.ts(侧栏折叠持久化)
 stores/      auth.ts chat.ts knowledge.ts admin.ts
-views/       Chat.vue(根路由 `/`)+ admin/{Login,Initialize,Dashboard,KnowledgeBases,Documents,RagConfig,Models,QaLogs}
-components/  chat/(会话侧栏/消息/引用/来源预览/输入框) admin/ common/ document/ knowledge/ ui/(shadcn-vue)
-layouts/     UserLayout.vue AdminLayout.vue
-router/      `/` Chat(公开)+ /Login /Initialize + AdminLayout 包裹的管理页
+views/       Home.vue(/ 介绍) Docs.vue(/docs 文档) Chat.vue(/chat 通栏对话)
+             admin/{Login,Initialize,Dashboard,KnowledgeBases,Documents,Settings,QaLogs}
+components/  shell/(AppShell 壳层 + TopNav 顶栏 + AppSidebar 全局侧栏 + DashboardShell 管理页二级导航)
+             chat/(消息/引用/来源预览/输入框) admin/(模型配置卡/RAG 参数表单/图表)
+             common/ document/ knowledge/ ui/(shadcn-vue)
+             docs/ 内置 Markdown(frontend/src/docs/*.md,import.meta.glob 静态导入)
+router/      `/` Home、`/docs`、`/chat`、`/Login`、`/Initialize` 公开;`/Dashboard` `/KnowledgeBases`
+             `/Documents` `/QaLogs` `/Settings` 管理页(DashboardShell 包裹);兜底重定向 `/`
 ```
+
+**统一壳层:** 所有页面共享 `AppShell`(TopNav 全宽顶栏 + AppSidebar 会话侧栏 + 内容区);顶栏四项导航 Home/Docs/Chat/Dashboard(未登录隐藏 Dashboard),管理页在内容区顶部另有 5 项二级标签。守卫逻辑在 `utils/guard.ts`(纯函数 + vitest)。
 
 **两种鉴权模式:**
 - 管理端(`/api/admin`、`/api/knowledge-bases`、`/api/documents`):JWT Bearer,axios 拦截器(`utils/request.ts`),token 存 `localStorage.admin_token`
@@ -195,11 +208,13 @@ router/      `/` Chat(公开)+ /Login /Initialize + AdminLayout 包裹的管理�
 
 测试用 vitest(`npm run test`),覆盖 utils/ 与 api/ 层;图标用 `@lucide/vue`(不用已弃用的 `lucide-vue-next`)。
 
+> **当前约定:** 前端已按统一壳层设计(`docs/superpowers/specs/2026-10-02-unified-shell-4pages-design.md`)重写;`frontend/` 的改动默认不提交,待用户确认后统一提交。
+
 ## 环境
 
 - **Windows 11** + Docker Desktop(postgres/qdrant 容器);Python 3.11,Node.js v24,npm,uv
 - 端口:后端 8001(8000 被系统占用)、前端 5173、Embedding 8080、Qdrant 6333、Postgres 5432
-- `.env` 在项目根目录(不提交,模板见 `.env.example`):DATABASE_URL / QDRANT_URL / JWT_SECRET_KEY / FILE_STORAGE_PATH 等
+- `.env` 在项目根目录(不提交,模板见 `.env.example`):DATABASE_URL / QDRANT_URL / JWT_SECRET_KEY / FILE_STORAGE_PATH / APP_CONFIG_PATH(模型与 RAG 配置文件路径,默认 `./app-config.yaml`)等
 - 依赖以 `pyproject.toml` 为准(uv 管理);根目录 `requirements.txt` 为旧钉版遗留
 
 ## 设计文档

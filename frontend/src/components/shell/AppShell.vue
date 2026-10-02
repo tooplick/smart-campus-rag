@@ -1,0 +1,44 @@
+<script setup lang="ts">
+// 统一壳层:全宽顶栏 + 左侧栏 + 内容区;所有页面(含 Login/Initialize)共享
+// 响应式三档:≥1024 常驻侧栏(折叠偏好持久化);窄屏侧栏变抽屉,汉堡呼出浮层
+import { computed, ref, watch } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
+import { useRoute } from 'vue-router'
+import TopNav from './TopNav.vue'
+import AppSidebar from './AppSidebar.vue'
+import { readSidebarCollapsed, writeSidebarCollapsed } from '@/utils/sidebar'
+
+const route = useRoute()
+const wide = useMediaQuery('(min-width: 1024px)')
+const collapsed = ref(readSidebarCollapsed())
+const drawerOpen = ref(false)
+
+function toggleSidebar() {
+    if (wide.value) {
+        collapsed.value = !collapsed.value
+        writeSidebarCollapsed(collapsed.value)
+    } else {
+        drawerOpen.value = !drawerOpen.value
+    }
+}
+
+/** 传给侧栏的隐藏态:宽屏看折叠偏好,窄屏看抽屉开关 */
+const sidebarHidden = computed(() => (wide.value ? collapsed.value : !drawerOpen.value))
+
+// 路由切换后收起窄屏抽屉,避免遮挡新页面
+watch(() => route.fullPath, () => { drawerOpen.value = false })
+</script>
+
+<template>
+    <div class="flex h-screen flex-col overflow-hidden bg-background">
+        <TopNav @toggle-sidebar="toggleSidebar" />
+        <div class="relative flex min-h-0 flex-1">
+            <!-- 窄屏抽屉背景遮罩 -->
+            <div v-if="!wide && drawerOpen" class="fixed inset-0 top-12 z-30 bg-black/40" @click="drawerOpen = false" />
+            <AppSidebar :collapsed="sidebarHidden" @navigate="drawerOpen = false" />
+            <main class="flex min-w-0 flex-1 flex-col overflow-hidden">
+                <router-view />
+            </main>
+        </div>
+    </div>
+</template>
