@@ -1,7 +1,10 @@
 """Initialize database tables."""
 import asyncio
 import sys
-sys.path.insert(0, "backend")
+from pathlib import Path
+
+# 项目根入 path(与 init-qdrant.py 一致;旧的 "backend" 目录已不存在)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.database import engine, Base
 from app.models import *  # noqa: F401, F403

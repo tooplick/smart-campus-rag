@@ -1,42 +1,42 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { resolveGuard } from '@/utils/guard'
 
-/** 管理页统一挂 AdminLayout 外壳,URL 为根级大驼峰(/Dashboard 等),不带 /admin/ 前缀 */
+/** 管理页挂 DashboardShell(二级标签导航),URL 根级大驼峰;壳层由 App.vue 统一包裹 */
 function adminRoute(path: string, name: string, component: () => Promise<unknown>) {
   return {
     path,
-    component: () => import('@/layouts/AdminLayout.vue'),
+    component: () => import('@/components/shell/DashboardShell.vue'),
     children: [{ path: '', name, component }],
+    meta: { admin: true },
   }
 }
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', name: 'Chat', component: () => import('@/views/Chat.vue'), meta: { public: true } },
+    { path: '/', name: 'Home', component: () => import('@/views/Home.vue'), meta: { public: true } },
+    { path: '/docs', name: 'Docs', component: () => import('@/views/Docs.vue'), meta: { public: true } },
+    { path: '/chat', name: 'Chat', component: () => import('@/views/Chat.vue'), meta: { public: true } },
     { path: '/Login', name: 'Login', component: () => import('@/views/admin/Login.vue'), meta: { public: true } },
     { path: '/Initialize', name: 'Initialize', component: () => import('@/views/admin/Initialize.vue'), meta: { public: true } },
     adminRoute('/Dashboard', 'Dashboard', () => import('@/views/admin/Dashboard.vue')),
     adminRoute('/KnowledgeBases', 'KnowledgeBases', () => import('@/views/admin/KnowledgeBases.vue')),
     adminRoute('/Documents', 'Documents', () => import('@/views/admin/Documents.vue')),
-    adminRoute('/RagConfig', 'RagConfig', () => import('@/views/admin/RagConfig.vue')),
-    adminRoute('/Models', 'Models', () => import('@/views/admin/Models.vue')),
     adminRoute('/QaLogs', 'QaLogs', () => import('@/views/admin/QaLogs.vue')),
+    adminRoute('/Settings', 'Settings', () => import('@/views/admin/Settings.vue')),
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
 
-// 守卫按 meta.public 判定公开页;管理页要求登录,强制改密期间拦截到 /Initialize
+// 守卫判定抽到 utils/guard(纯函数,可 vitest 覆盖);登录态从 auth store 读取
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
-  if (to.meta.public) {
-    // 已登录(且无需改密)再访问登录页,直接送进仪表盘
-    if (to.name === 'Login' && auth.token && !auth.mustChangePassword) return '/Dashboard'
-    return true
-  }
-  if (!auth.token) return '/Login'
-  if (auth.mustChangePassword) return '/Initialize'
-  return true
+  const target = resolveGuard(
+    { name: to.name as string | undefined, fullPath: to.fullPath, query: to.query, meta: to.meta },
+    { token: auth.token, mustChangePassword: auth.mustChangePassword },
+  )
+  return target
 })
 
 export default router

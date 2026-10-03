@@ -53,13 +53,12 @@ async function submit() {
 </script>
 
 <template>
-  <div class="flex min-h-screen items-center justify-center bg-muted/40 p-4">
-    <form
-      class="w-full max-w-sm space-y-4 rounded-xl border bg-background p-6 shadow-lg"
-      @submit.prevent="submit"
-    >
+  <div class="flex min-h-full flex-1 items-center justify-center overflow-y-auto bg-muted/40 p-4">
+    <form class="w-full max-w-sm space-y-4 rounded-xl border bg-background p-6 shadow-lg" @submit.prevent="submit">
       <div>
-        <h1 class="flex items-center gap-2 text-xl font-semibold"><ShieldCheck class="h-5 w-5" /> 首次初始化</h1>
+        <h1 class="flex items-center gap-2 text-xl font-semibold">
+          <ShieldCheck class="h-5 w-5" /> 首次初始化
+        </h1>
         <p class="mt-1 text-sm text-muted-foreground">首次登录需修改默认密码</p>
       </div>
       <div class="space-y-1">
@@ -69,16 +68,12 @@ async function submit() {
       <div class="space-y-1">
         <Label for="current">当前密码</Label>
         <div class="relative">
-          <Input id="current" v-model="currentPassword" :type="showPassword.current ? 'text' : 'password'"
-            class="pr-10" autocomplete="current-password" required
-            :aria-invalid="Boolean(touched.current && currentError)"
+          <Input id="current" v-model="currentPassword" :type="showPassword.current ? 'text' : 'password'" class="pr-10"
+            autocomplete="current-password" required :aria-invalid="Boolean(touched.current && currentError)"
             @blur="touched.current = true" />
-          <button
-            type="button"
+          <button type="button"
             class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
-            :aria-label="showPassword.current ? '隐藏密码' : '显示密码'"
-            @click="showPassword.current = !showPassword.current"
-          >
+            :aria-label="showPassword.current ? '隐藏密码' : '显示密码'" @click="showPassword.current = !showPassword.current">
             <EyeOff v-if="showPassword.current" class="h-4 w-4" />
             <Eye v-else class="h-4 w-4" />
           </button>
@@ -88,16 +83,12 @@ async function submit() {
       <div class="space-y-1">
         <Label for="new">新密码(至少 6 位)</Label>
         <div class="relative">
-          <Input id="new" v-model="newPassword" :type="showPassword.next ? 'text' : 'password'"
-            class="pr-10" autocomplete="new-password" required
-            :aria-invalid="Boolean(touched.next && newError)"
+          <Input id="new" v-model="newPassword" :type="showPassword.next ? 'text' : 'password'" class="pr-10"
+            autocomplete="new-password" required :aria-invalid="Boolean(touched.next && newError)"
             @blur="touched.next = true" />
-          <button
-            type="button"
+          <button type="button"
             class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
-            :aria-label="showPassword.next ? '隐藏密码' : '显示密码'"
-            @click="showPassword.next = !showPassword.next"
-          >
+            :aria-label="showPassword.next ? '隐藏密码' : '显示密码'" @click="showPassword.next = !showPassword.next">
             <EyeOff v-if="showPassword.next" class="h-4 w-4" />
             <Eye v-else class="h-4 w-4" />
           </button>
@@ -107,16 +98,12 @@ async function submit() {
       <div class="space-y-1">
         <Label for="confirm">确认新密码</Label>
         <div class="relative">
-          <Input id="confirm" v-model="confirmPassword" :type="showPassword.confirm ? 'text' : 'password'"
-            class="pr-10" autocomplete="new-password" required
-            :aria-invalid="Boolean(touched.confirm && confirmError)"
+          <Input id="confirm" v-model="confirmPassword" :type="showPassword.confirm ? 'text' : 'password'" class="pr-10"
+            autocomplete="new-password" required :aria-invalid="Boolean(touched.confirm && confirmError)"
             @blur="touched.confirm = true" />
-          <button
-            type="button"
+          <button type="button"
             class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
-            :aria-label="showPassword.confirm ? '隐藏密码' : '显示密码'"
-            @click="showPassword.confirm = !showPassword.confirm"
-          >
+            :aria-label="showPassword.confirm ? '隐藏密码' : '显示密码'" @click="showPassword.confirm = !showPassword.confirm">
             <EyeOff v-if="showPassword.confirm" class="h-4 w-4" />
             <Eye v-else class="h-4 w-4" />
           </button>

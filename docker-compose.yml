@@ -27,7 +27,8 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
+      # 镜像内无 curl/wget,用 bash /dev/tcp 直连 /healthz
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333 && printf 'GET /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q '200'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -38,8 +39,26 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "8000:8000"
+    environment:
+      # 覆盖 .env 中面向本机开发的 localhost 取值,改走 compose 服务名
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/campus_rag
+      QDRANT_URL: http://qdrant:6333
+      FILE_STORAGE_PATH: /app/uploads
+    # 启动即幂等初始化(建表/Qdrant 集合/首个管理员)后拉起服务
+    command: sh -c "python scripts/bootstrap.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - backend_uploads:/app/uploads
+      # 配置不入镜像(.dockerignore),运行时挂载宿主机文件
+      - ./app-config.yaml:/app/app-config.yaml
+    extra_hosts:
+      # 容器内访问宿主机上的模型服务(如本机 llama.cpp)用 host.docker.internal:端口
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,21 +69,26 @@ services:
     build: ./frontend
     container_name: campus-rag-frontend
     restart: unless-stopped
-    ports:
-      - "5173:5173"
+    # 对外只经 nginx;如需单独直连前端,取消下面注释
+    # ports:
+    #   - "5173:5173"
 
   nginx:
     image: nginx:alpine
     container_name: campus-rag-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
+      # 端口被占时:WEB_PORT=8080 docker compose up -d
+      - "${WEB_PORT:-80}:80"
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
 
 volumes:
   postgres_data:
   qdrant_data:
+  backend_uploads:
