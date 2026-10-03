@@ -27,10 +27,10 @@
 
 ### 方式一:Docker 一键部署
 
-```powershell
-Copy-Item .env.example .env                              # 首次
-Copy-Item app-config.yaml.example app-config.yaml        # 首次,填入模型配置
-docker compose up -d --build
+```bash
+cp .env.example .env                              # 首次
+cp app-config.yaml.example app-config.yaml        # 首次,填入模型配置
+docker compose up -d
 ```
 
 打开 <http://localhost>,初始账号 `admin / admin`(首次登录强制改密)。
