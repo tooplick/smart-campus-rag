@@ -30,6 +30,9 @@ function isActive(to: string) {
     return route.path === to
 }
 
+/** 汉堡仅在 Chat 页出现:侧栏是聊天会话列表,其他页面没有可展开的内容 */
+const showSidebarToggle = computed(() => route.path === '/chat')
+
 async function onLogout() {
     await auth.logout()
     router.push('/')
@@ -38,8 +41,8 @@ async function onLogout() {
 
 <template>
     <header class="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3">
-        <!-- 汉堡:桌面折叠侧栏,窄屏呼出抽屉 -->
-        <Button variant="ghost" size="icon" aria-label="切换侧栏" @click="emit('toggle-sidebar')">
+        <!-- 汉堡:仅 Chat 页显示;桌面折叠侧栏,窄屏呼出抽屉 -->
+        <Button v-if="showSidebarToggle" variant="ghost" size="icon" aria-label="切换侧栏" @click="emit('toggle-sidebar')">
             <Menu class="h-4 w-4" />
         </Button>
 

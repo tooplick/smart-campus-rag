@@ -24,6 +24,19 @@ const router = createRouter({
     adminRoute('/KnowledgeBases', 'KnowledgeBases', () => import('@/views/admin/KnowledgeBases.vue')),
     adminRoute('/Documents', 'Documents', () => import('@/views/admin/Documents.vue')),
     adminRoute('/QaLogs', 'QaLogs', () => import('@/views/admin/QaLogs.vue')),
+    // 模型页:四类子菜单(/Model/{type})→ 配置列表;空路径重定向到对话 LLM
+    {
+      path: '/Model',
+      component: () => import('@/components/shell/DashboardShell.vue'),
+      meta: { admin: true },
+      children: [
+        { path: '', redirect: '/Model/llm' },
+        { path: 'llm', name: 'ModelLlm', component: () => import('@/views/admin/Model.vue'), props: { type: 'llm', title: '对话 LLM' } },
+        { path: 'embedding', name: 'ModelEmbedding', component: () => import('@/views/admin/Model.vue'), props: { type: 'embedding', title: 'Embedding' } },
+        { path: 'vision', name: 'ModelVision', component: () => import('@/views/admin/Model.vue'), props: { type: 'vision', title: 'Vision' } },
+        { path: 'rerank', name: 'ModelRerank', component: () => import('@/views/admin/Model.vue'), props: { type: 'rerank', title: 'Rerank(重排)' } },
+      ],
+    },
     adminRoute('/Settings', 'Settings', () => import('@/views/admin/Settings.vue')),
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

@@ -32,7 +32,9 @@ describe('normalizeError', () => {
 
 describe('errorMessage', () => {
   it('映射常见错误码', () => {
-    expect(errorMessage(new ApiError('x', 'RAG_NOT_READY', 503))).toContain('知识库尚未就绪')
+    // RAG_NOT_READY 等细化码不再走码表:后端返回的定位到模型配置的详细文案直接透传
+    expect(errorMessage(new ApiError('RAG 管道未就绪:请到「设置 → 模型配置」启用完整配置', 'RAG_NOT_READY', 503)))
+      .toBe('RAG 管道未就绪:请到「设置 → 模型配置」启用完整配置')
   })
   it('无映射时回退原始消息', () => {
     expect(errorMessage(new ApiError('原始消息', 'UNKNOWN_X', 500))).toBe('原始消息')

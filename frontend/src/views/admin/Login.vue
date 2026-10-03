@@ -30,7 +30,11 @@ const passwordError = computed(() => (password.value ? '' : '请输入密码'))
 async function submit() {
   touched.username = true
   touched.password = true
-  if (usernameError.value || passwordError.value) return
+  // 校验不通过:首条错误顶部居中 toast 弹出(字段行内红字同步标出)
+  if (usernameError.value || passwordError.value) {
+    toast.error(usernameError.value || passwordError.value)
+    return
+  }
   loading.value = true
   try {
     await auth.login(username.value, password.value)

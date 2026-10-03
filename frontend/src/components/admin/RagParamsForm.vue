@@ -24,7 +24,8 @@ const form = reactive({
     llm_max_retries: 3, request_timeout: 120,
 })
 const loading = ref(true)
-const loadError = ref('')
+// 失败仅驱动「通用错误态 + 重试」,具体原因走顶部居中 toast
+const failed = ref(false)
 const saving = ref(false)
 
 /** 各参数的说明文案(含义与取值范围) */
@@ -70,11 +71,12 @@ watch(() => admin.ragConfig, (c) => {
 
 async function load() {
     loading.value = true
-    loadError.value = ''
+    failed.value = false
     try {
         await admin.loadRagConfig()
     } catch (e) {
-        loadError.value = errorMessage(e)
+        failed.value = true
+        toast.error(errorMessage(e))
     } finally {
         loading.value = false
     }
@@ -131,8 +133,7 @@ async function save() {
         </div>
 
         <!-- 失败:组件内错误态 + 重试 -->
-        <EmptyState v-else-if="loadError" :icon="AlertCircle" variant="error" title="RAG 配置加载失败"
-            :description="loadError">
+        <EmptyState v-else-if="failed" :icon="AlertCircle" variant="error" title="RAG 配置加载失败">
             <template #action>
                 <button class="rounded-md border px-4 py-2 text-sm hover:bg-accent" @click="load">重试</button>
             </template>

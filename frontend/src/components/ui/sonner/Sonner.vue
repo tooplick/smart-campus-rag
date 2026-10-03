@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import type { ToasterProps } from 'vue-sonner'
 
+import 'vue-sonner/style.css'
 import {
   CircleCheckIcon,
   InfoIcon,
@@ -18,26 +19,21 @@ const delegatedProps = reactiveOmit(props, 'class', 'toastOptions')
 </script>
 
 <template>
-  <Sonner
-    :class="cn('toaster group', props.class)"
-    :style="{
-      '--normal-bg': 'var(--popover)',
-      '--normal-text': 'var(--popover-foreground)',
-      '--normal-border': 'var(--border)',
-      '--border-radius': 'var(--radius)',
-      '--gray2': 'hsl(var(--popover) / 0.9)',
-      '--gray3': 'var(--border)',
-      '--gray4': 'var(--border)',
-      '--gray5': 'var(--border)',
-      '--gray12': 'var(--popover-foreground)',
-    }"
-    :toast-options="props.toastOptions ?? {
-      classes: {
-        toast: 'rounded-2xl',
-      },
-    }"
-    v-bind="delegatedProps"
-  >
+  <Sonner :class="cn('toaster group', props.class)" :style="{
+    '--normal-bg': 'var(--popover)',
+    '--normal-text': 'var(--popover-foreground)',
+    '--normal-border': 'var(--border)',
+    '--border-radius': 'var(--radius)',
+    '--gray2': 'hsl(var(--popover) / 0.9)',
+    '--gray3': 'var(--border)',
+    '--gray4': 'var(--border)',
+    '--gray5': 'var(--border)',
+    '--gray12': 'var(--popover-foreground)',
+  }" :toast-options="props.toastOptions ?? {
+    classes: {
+      toast: 'rounded-2xl',
+    },
+  }" v-bind="delegatedProps">
     <template #success-icon>
       <CircleCheckIcon class="size-4" />
     </template>

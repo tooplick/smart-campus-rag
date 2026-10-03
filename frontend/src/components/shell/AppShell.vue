@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// 统一壳层:全宽顶栏 + 左侧栏 + 内容区;所有页面(含 Login/Initialize)共享
-// 响应式三档:≥1024 常驻侧栏(折叠偏好持久化);窄屏侧栏变抽屉,汉堡呼出浮层
+// 统一壳层:全宽顶栏 + 内容区;会话侧栏仅 /chat 渲染(其他页无聊天会话,不给展开入口)
+// 侧栏响应式三档:≥1024 常驻(折叠偏好持久化);窄屏变抽屉,汉堡呼出浮层
 import { computed, ref, watch } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
 import { useRoute } from 'vue-router'
@@ -12,6 +12,9 @@ const route = useRoute()
 const wide = useMediaQuery('(min-width: 1024px)')
 const collapsed = ref(readSidebarCollapsed())
 const drawerOpen = ref(false)
+
+/** 聊天会话侧栏只属于 Chat 页:其他页面(Home/Docs/管理页)不渲染、不出展开按钮 */
+const showSidebar = computed(() => route.path === '/chat')
 
 function toggleSidebar() {
     if (wide.value) {
@@ -33,9 +36,10 @@ watch(() => route.fullPath, () => { drawerOpen.value = false })
     <div class="flex h-screen flex-col overflow-hidden bg-background">
         <TopNav @toggle-sidebar="toggleSidebar" />
         <div class="relative flex min-h-0 flex-1">
-            <!-- 窄屏抽屉背景遮罩 -->
-            <div v-if="!wide && drawerOpen" class="fixed inset-0 top-12 z-30 bg-black/40" @click="drawerOpen = false" />
-            <AppSidebar :collapsed="sidebarHidden" @navigate="drawerOpen = false" />
+            <!-- 窄屏抽屉背景遮罩(仅 Chat 页) -->
+            <div v-if="showSidebar && !wide && drawerOpen" class="fixed inset-0 top-12 z-30 bg-black/40"
+                @click="drawerOpen = false" />
+            <AppSidebar v-if="showSidebar" :collapsed="sidebarHidden" @navigate="drawerOpen = false" />
             <main class="flex min-w-0 flex-1 flex-col overflow-hidden">
                 <router-view />
             </main>

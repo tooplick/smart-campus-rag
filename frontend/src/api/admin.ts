@@ -60,6 +60,11 @@ export function testModel(type: ModelType, name?: string) {
   return request.post<unknown, ModelTestResult>(`/admin/models/${type}/test`, name ? { name } : undefined)
 }
 
+/** 用 base_url/api_key 拉取远端可用模型名列表(新建配置时下拉选择) */
+export function fetchRemoteModels(base_url: string, api_key: string) {
+  return request.post<unknown, { models: string[] }>('/admin/model-profiles/list-models', { base_url, api_key })
+}
+
 /** QA 日志列表(分页、可排序) */
 export function listQaLogs(params: {
   page?: number; page_size?: number; sort_by?: string; sort_order?: 'asc' | 'desc'

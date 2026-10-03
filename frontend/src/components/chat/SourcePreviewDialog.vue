@@ -3,6 +3,7 @@
 // PDF → 服务端逐页渲染图片堆叠 + 滚动浏览(浏览器 PDF 插件在部分环境不可用,iframe 会黑屏)
 // 图片 → 原图;文本类 → 原文;Office 类浏览器渲染不了 → 下载引导
 import { computed, ref, watch } from 'vue'
+import { toast } from 'vue-sonner'
 import { Download, FileText } from '@lucide/vue'
 import { documentViewUrl, downloadDocument, fetchDocumentRawText } from '@/api/documents'
 import {
@@ -34,7 +35,8 @@ const kind = computed<'pdf' | 'image' | 'text' | 'download'>(() => {
 })
 
 const loading = ref(false)
-const error = ref('')
+// 失败仅驱动「通用错误态 + 重试」,具体原因走顶部居中 toast
+const failed = ref(false)
 const rawText = ref('')
 const viewUrl = computed(() => documentViewUrl(props.documentId))
 /** PDF 由 PdfPreview(pdf.js)自行加载渲染,文字层可选中复制 */
@@ -42,16 +44,23 @@ const pdfKey = ref(0)
 
 async function load() {
   loading.value = true
-  error.value = ''
+  failed.value = false
   try {
     if (kind.value === 'text') {
       rawText.value = await fetchDocumentRawText(props.documentId)
     }
   } catch {
-    error.value = '文件获取失败,可能已被删除'
+    failed.value = true
+    toast.error('文件获取失败,可能已被删除')
   } finally {
     loading.value = false
   }
+}
+
+/** PDF 渲染失败:toast 弹原因并切错误态 */
+function onPreviewError(msg: string) {
+  failed.value = true
+  toast.error(msg)
 }
 
 watch(
@@ -69,7 +78,7 @@ async function onDownload() {
   try {
     await downloadDocument(props.documentId, props.filename)
   } catch {
-    error.value = '下载失败,文件不存在或已删除'
+    toast.error('下载失败,文件不存在或已删除')
   } finally {
     downloading.value = false
   }
@@ -86,15 +95,16 @@ async function onDownload() {
       </DialogHeader>
 
       <!-- PDF:pdf.js 渲染真实页面 + 文字层,滚动浏览且文字可选中复制 -->
-      <ScrollArea v-if="kind === 'pdf' && !error" class="max-h-[60vh] pr-3">
-        <PdfPreview :key="pdfKey" :document-id="documentId" :filename="filename" @error="error = $event" />
+      <ScrollArea v-if="kind === 'pdf' && !failed" class="max-h-[60vh] pr-3">
+        <PdfPreview :key="pdfKey" :document-id="documentId" :filename="filename" @error="onPreviewError" />
       </ScrollArea>
       <!-- 图片:原图展示 -->
-      <div v-else-if="kind === 'image' && !error" class="flex max-h-[60vh] justify-center overflow-auto rounded-md border">
+      <div v-else-if="kind === 'image' && !failed"
+        class="flex max-h-[60vh] justify-center overflow-auto rounded-md border">
         <img :src="viewUrl" :alt="filename" class="max-h-[60vh] object-contain" />
       </div>
       <!-- 文本类:原文展示 -->
-      <ScrollArea v-else-if="kind === 'text' && !error" class="max-h-[60vh] pr-3">
+      <ScrollArea v-else-if="kind === 'text' && !failed" class="max-h-[60vh] pr-3">
         <div v-if="loading" class="space-y-2 py-1">
           <Skeleton v-for="i in 6" :key="i" class="h-4" :class="i % 3 === 0 ? 'w-2/3' : 'w-full'" />
         </div>
@@ -102,7 +112,7 @@ async function onDownload() {
         <p v-else class="text-sm text-muted-foreground">暂无内容</p>
       </ScrollArea>
       <!-- Office 等:浏览器无法内联渲染,给下载引导 -->
-      <div v-else-if="kind === 'download' && !error" class="flex flex-col items-start gap-3 py-6">
+      <div v-else-if="kind === 'download' && !failed" class="flex flex-col items-start gap-3 py-6">
         <p class="flex items-center gap-2 text-sm text-muted-foreground">
           <FileText class="h-4 w-4" /> 浏览器暂不支持在线预览该格式,请下载查看
         </p>
@@ -110,9 +120,9 @@ async function onDownload() {
           <Download class="mr-1 h-4 w-4" /> {{ downloading ? '下载中…' : '下载文件' }}
         </Button>
       </div>
-      <!-- 错误态 -->
-      <div v-if="error" class="flex flex-col items-start gap-2 py-4 text-sm">
-        <p class="text-destructive">{{ error }}</p>
+      <!-- 错误态:具体原因已 toast 弹出,这里只留通用占位 + 重试 -->
+      <div v-if="failed" class="flex flex-col items-start gap-2 py-4 text-sm">
+        <p class="text-muted-foreground">加载失败,请重试</p>
         <button class="rounded-md border px-3 py-1.5 text-sm hover:bg-accent" @click="load">重试</button>
       </div>
     </DialogContent>

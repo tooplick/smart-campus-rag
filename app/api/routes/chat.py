@@ -4,12 +4,14 @@ import json
 import uuid
 import logging
 
+import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.conversation import Conversation
+from app.rag.errors import RAGStageError
 from app.schemas.chat import ChatRequest
 from app.services.chat_service import ChatService
 from app.utils.response import success_response, error_response
@@ -22,6 +24,54 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 def _get_rag_pipeline():
     from app.main import rag_pipeline
     return rag_pipeline
+
+
+def _short(exc: BaseException, limit: int = 160) -> str:
+    """异常压成单行短文案(SSE 单事件内可读)。"""
+    text = " ".join(str(exc).split()) or exc.__class__.__name__
+    return text[:limit]
+
+
+def _classify_chat_error(exc: Exception) -> tuple[str, str]:
+    """把底层异常翻译成错误码 + 细化文案,定位到具体模型配置项。
+
+    阶段(embedding / llm)由 RAGStageError 提供,原因由 httpx 异常类型判定:
+    连接失败 → base_url,401/403 → API Key,404 → 模型名。
+    """
+    stage = "模型"
+    cause: BaseException = exc
+    if isinstance(exc, RAGStageError):
+        stage = {"embedding": "Embedding", "llm": "对话 LLM"}.get(exc.stage, "模型")
+        cause = exc.cause
+
+    if isinstance(cause, httpx.HTTPStatusError):
+        status = cause.response.status_code
+        if status in (401, 403):
+            return (
+                "MODEL_AUTH_ERROR",
+                f"{stage} 服务鉴权失败(HTTP {status}):API Key 无效或无权限,"
+                f"请到「设置 → 模型配置」核对该模型的 API Key",
+            )
+        if status == 404:
+            return (
+                "MODEL_NOT_FOUND",
+                f"{stage} 模型名不存在(HTTP 404):请到「设置 → 模型配置」核对模型名拼写,"
+                f"或确认服务商已提供该模型",
+            )
+        if status == 429:
+            return "MODEL_RATE_LIMITED", f"{stage} 服务限流(HTTP 429),请稍后重试"
+        body = _short(cause, 80)
+        return (
+            "MODEL_HTTP_ERROR",
+            f"{stage} 服务返回 HTTP {status}:{body},请到「设置 → 模型配置」核对 base_url 与模型名",
+        )
+    if isinstance(cause, (httpx.TimeoutException, httpx.NetworkError, ConnectionError, OSError)):
+        return (
+            "MODEL_CONNECT_ERROR",
+            f"无法连接 {stage} 服务:{_short(cause)},请到「设置 → 模型配置」核对 base_url 是否正确、"
+            f"对应模型服务是否已启动",
+        )
+    return "LLM_ERROR", f"{stage} 调用失败:{_short(cause)}"
 
 
 @router.get("/session")
@@ -77,7 +127,12 @@ async def chat(
 
     rag_pipeline = _get_rag_pipeline()
     if not rag_pipeline:
-        return error_response("RAG 管道未就绪", status_code=503, code="RAG_NOT_READY")
+        return error_response(
+            "RAG 管道未就绪:app-config.yaml 缺少可用的 embedding/llm 启用配置,"
+            "或启动时配置校验失败,请到「设置 → 模型配置」启用完整配置后重启服务",
+            status_code=503,
+            code="RAG_NOT_READY",
+        )
 
     message_id = str(uuid.uuid4())
 
@@ -133,7 +188,8 @@ async def chat(
 
             except Exception as e:
                 logger.exception("Chat SSE error")
-                yield f"event: error\ndata: {json.dumps({'code': 'LLM_ERROR', 'message': str(e)[:200]})}\n\n"
+                err_code, err_msg = _classify_chat_error(e)
+                yield f"event: error\ndata: {json.dumps({'code': err_code, 'message': err_msg}, ensure_ascii=False)}\n\n"
 
         return StreamingResponse(
             event_stream(),
@@ -190,4 +246,5 @@ async def chat(
 
         except Exception as e:
             logger.exception("Chat error")
-            return error_response("回答生成失败", status_code=500, code="LLM_ERROR")
+            err_code, err_msg = _classify_chat_error(e)
+            return error_response(err_msg, status_code=500, code=err_code)

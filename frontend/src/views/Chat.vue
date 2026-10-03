@@ -18,7 +18,7 @@ function onSend(content: string) {
 <template>
   <div class="flex min-h-0 flex-1 flex-col">
     <WelcomePanel v-if="showWelcome" @ask="onSend" />
-    <MessageList v-else :messages="chat.messages" />
+    <MessageList v-else :messages="chat.messages" @retry="chat.retryLast()" />
     <ChatComposer :disabled="chat.sending" @send="onSend" />
   </div>
 </template>

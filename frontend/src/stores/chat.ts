@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, reactive } from 'vue'
+import { toast } from 'vue-sonner'
 import * as chatApi from '@/api/chat'
 import { streamChat } from '@/utils/sse'
 import { errorMessage } from '@/utils/request'
@@ -12,7 +13,8 @@ export interface UiMessage {
   content: string
   sources?: Source[]
   streaming?: boolean
-  error?: string
+  /** 回答生成失败:详细原因已 toast 弹出,气泡只留状态 + 重试入口 */
+  failed?: boolean
 }
 
 export const useChatStore = defineStore('chat', () => {
@@ -64,6 +66,13 @@ export const useChatStore = defineStore('chat', () => {
     if (currentConversationId.value === id) newConversation()
   }
 
+  /** 流式失败:详细报错(细化到模型配置)顶部居中 toast 弹出;气泡标记 failed 供重试入口 */
+  function failAssistant(assistant: UiMessage, e: unknown) {
+    assistant.streaming = false
+    assistant.failed = true
+    toast.error(errorMessage(e))
+  }
+
   /** 发送问题,SSE 流式累积回答 */
   async function send(content: string) {
     if (sending.value) return
@@ -84,32 +93,43 @@ export const useChatStore = defineStore('chat', () => {
           onStart: (d) => {
             const isNew = !currentConversationId.value
             currentConversationId.value = d.conversation_id
-            if (isNew) loadConversations().catch(() => {})
+            if (isNew) loadConversations().catch((e) => toast.error(errorMessage(e)))
           },
           onToken: (d) => { assistant.content += d.content },
           onSources: (d) => { assistant.sources = d.sources },
           onDone: () => {
             assistant.streaming = false
-            loadConversations().catch(() => {})
+            loadConversations().catch((e) => toast.error(errorMessage(e)))
           },
           onError: (e) => {
-            assistant.streaming = false
-            assistant.error = errorMessage(e)
+            failAssistant(assistant, e)
           },
         },
       )
     } catch (e) {
-      assistant.streaming = false
-      assistant.error = errorMessage(e)
+      failAssistant(assistant, e)
     } finally {
       sending.value = false
     }
+  }
+
+  /** 重试最近一次失败的回答:移除该失败问答对后按原问题重发 */
+  async function retryLast() {
+    if (sending.value) return
+    const msgs = messages.value
+    const last = msgs[msgs.length - 1]
+    if (!last || last.role !== 'assistant' || !last.failed) return
+    const userMsg = msgs[msgs.length - 2]
+    if (!userMsg || userMsg.role !== 'user') return
+    const question = userMsg.content
+    msgs.splice(msgs.length - 2, 2)
+    await send(question)
   }
 
   return {
     conversations, currentConversationId, messages,
     sending, loadingHistory,
     ensureSession, loadConversations, newConversation, openConversation,
-    renameConversation, removeConversation, send,
+    renameConversation, removeConversation, send, retryLast,
   }
 })

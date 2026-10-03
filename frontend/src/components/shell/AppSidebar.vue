@@ -3,9 +3,11 @@
 // 会话列表逻辑迁自原 ConversationSidebar;数据经 chat store 与 ChatView 共享
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { toast } from 'vue-sonner'
 import { LogIn, LogOut, MessageSquare, Pencil, Plus, Trash2 } from '@lucide/vue'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
+import { errorMessage } from '@/utils/request'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -24,7 +26,7 @@ const deleteId = ref<string | null>(null)
 const confirmOpen = ref(false)
 
 onMounted(() => {
-    chat.loadConversations().catch(() => { })
+    chat.loadConversations().catch((e) => toast.error(errorMessage(e)))
 })
 
 function startRename(id: string, title: string) {
@@ -33,8 +35,13 @@ function startRename(id: string, title: string) {
 }
 
 async function confirmRename(id: string) {
-    if (renameText.value.trim()) await chat.renameConversation(id, renameText.value.trim())
-    renamingId.value = null
+    try {
+        if (renameText.value.trim()) await chat.renameConversation(id, renameText.value.trim())
+    } catch (e) {
+        toast.error(errorMessage(e))
+    } finally {
+        renamingId.value = null
+    }
 }
 
 function askDelete(id: string) {
@@ -43,12 +50,22 @@ function askDelete(id: string) {
 }
 
 async function onConfirmDelete() {
-    if (deleteId.value) await chat.removeConversation(deleteId.value)
+    if (!deleteId.value) return
+    try {
+        await chat.removeConversation(deleteId.value)
+    } catch (e) {
+        toast.error(errorMessage(e))
+    }
 }
 
 /** 切换会话:Chat 页内即时生效;其他页先跳转到 /chat */
 async function openConversation(id: string) {
-    await chat.openConversation(id)
+    try {
+        await chat.openConversation(id)
+    } catch (e) {
+        toast.error(errorMessage(e))
+        return
+    }
     if (route.path !== '/chat') router.push('/chat')
     emit('navigate')
 }
@@ -93,7 +110,7 @@ async function onLogout() {
                         <template v-else>
                             <MessageSquare class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                             <button class="min-w-0 flex-1 truncate text-left" @click="openConversation(c.id)">{{ c.title
-                                }}</button>
+                            }}</button>
                             <span class="hidden shrink-0 gap-0.5 group-hover:flex">
                                 <button class="rounded p-1 hover:bg-background" @click="startRename(c.id, c.title)">
                                     <Pencil class="h-3 w-3" />

@@ -2,7 +2,7 @@
 // 管理页外壳:内容区顶部 5 项二级标签导航 + 内容滚动区
 // 原 AdminLayout 的侧栏职责已拆给 TopNav(一级)+ 本标签栏(二级)
 import { useRoute } from 'vue-router'
-import { FileText, LayoutDashboard, ScrollText, Settings, Database } from '@lucide/vue'
+import { FileText, LayoutDashboard, ScrollText, Settings, Database, Cpu } from '@lucide/vue'
 
 const route = useRoute()
 
@@ -11,11 +11,13 @@ const tabs = [
     { to: '/KnowledgeBases', label: '知识库', icon: Database },
     { to: '/Documents', label: '文档', icon: FileText },
     { to: '/QaLogs', label: '问答日志', icon: ScrollText },
+    { to: '/Model', label: '模型', icon: Cpu },
     { to: '/Settings', label: '设置', icon: Settings },
 ]
 
 function isActive(to: string) {
-    return route.path.toLowerCase() === to.toLowerCase()
+    // /Model 下有子路由(/Model/llm 等),前缀匹配保证父标签仍高亮
+    return route.path.toLowerCase().startsWith(to.toLowerCase())
 }
 </script>
 

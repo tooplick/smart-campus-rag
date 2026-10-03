@@ -4,6 +4,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { AlertCircle, Database, FileText, Layers, MessageSquare } from '@lucide/vue'
 import type { EChartsOption } from 'echarts'
+import { toast } from 'vue-sonner'
 import { errorMessage } from '@/utils/request'
 import { useAdminStore } from '@/stores/admin'
 import Chart from '@/components/admin/Chart.vue'
@@ -12,15 +13,17 @@ import EmptyState from '@/components/common/EmptyState.vue'
 
 const admin = useAdminStore()
 const loading = ref(true)
-const error = ref('')
+// 失败仅驱动「通用错误态 + 重试」,具体原因走顶部居中 toast
+const failed = ref(false)
 
 async function load() {
   loading.value = true
-  error.value = ''
+  failed.value = false
   try {
     await admin.loadDashboard()
   } catch (e) {
-    error.value = errorMessage(e)
+    failed.value = true
+    toast.error(errorMessage(e))
   } finally {
     loading.value = false
   }
@@ -106,12 +109,8 @@ const distOption = computed<EChartsOption>(() => ({
       </div>
     </template>
 
-    <!-- 失败:页面内错误态 + 重试 -->
-    <EmptyState
-      v-else-if="error"
-      :icon="AlertCircle" variant="error"
-      title="仪表盘加载失败" :description="error"
-    >
+    <!-- 失败:toast 弹具体原因,页面留通用错误态 + 重试 -->
+    <EmptyState v-else-if="failed" :icon="AlertCircle" variant="error" title="仪表盘加载失败">
       <template #action>
         <button class="rounded-md border px-4 py-2 text-sm hover:bg-accent" @click="load">重试</button>
       </template>
@@ -119,10 +118,8 @@ const distOption = computed<EChartsOption>(() => ({
 
     <template v-else>
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div
-          v-for="s in stats" :key="s.label"
-          class="rounded-lg border bg-background p-4 transition-shadow hover:shadow-md"
-        >
+        <div v-for="s in stats" :key="s.label"
+          class="rounded-lg border bg-background p-4 transition-shadow hover:shadow-md">
           <div class="flex items-center justify-between">
             <p class="text-sm text-muted-foreground">{{ s.label }}</p>
             <component :is="s.icon" class="h-4 w-4 text-muted-foreground" />

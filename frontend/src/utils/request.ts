@@ -38,8 +38,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   MESSAGE_TOO_LONG: '问题长度不能超过 2000 字',
   INVALID_KNOWLEDGE_BASE: '所选知识库不可用(不存在、已禁用或正在建立索引)',
   CONVERSATION_NOT_FOUND: '会话不存在或已删除',
-  RAG_NOT_READY: '知识库尚未就绪,请稍后再试',
-  LLM_ERROR: '模型服务出错,请稍后再试',
+  // RAG_NOT_READY / LLM_ERROR / MODEL_* 不在码表:后端已返回细化文案(定位到具体模型配置项),直接透传
   INVALID_CREDENTIALS: '用户名或密码错误',
   ADMIN_NOT_INITIALIZED: '管理员尚未初始化',
   ADMIN_DISABLED: '管理员账号已禁用',

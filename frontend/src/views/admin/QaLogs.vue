@@ -26,17 +26,18 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
-const error = ref('')
+// 失败仅驱动「通用错误态 + 重试」,具体原因走顶部居中 toast
+const failed = ref(false)
 // 骨架仅在首屏显示,动作后的重载保持表格稳定(防整表闪烁)
 const hasLoaded = ref(false)
-const showSkeleton = computed(() => loading.value && !hasLoaded.value && !error.value)
+const showSkeleton = computed(() => loading.value && !hasLoaded.value && !failed.value)
 
 const drawerOpen = ref(false)
 const detail = ref<QaLogDetail | null>(null)
 
 async function load() {
   loading.value = true
-  error.value = ''
+  failed.value = false
   try {
     const paged = await admin.loadQaLogs({
       page: page.value, page_size: pageSize, sort_by: 'created_at', sort_order: 'desc',
@@ -44,7 +45,8 @@ async function load() {
     items.value = paged.items
     total.value = paged.total
   } catch (e) {
-    error.value = errorMessage(e)
+    failed.value = true
+    toast.error(errorMessage(e))
   } finally {
     loading.value = false
     hasLoaded.value = true
@@ -83,11 +85,7 @@ function scoreText(score: number) {
 
     <TableSkeleton v-if="showSkeleton" :rows="6" :cols="6" />
 
-    <EmptyState
-      v-else-if="error"
-      :icon="AlertCircle" variant="error"
-      title="问答日志加载失败" :description="error"
-    >
+    <EmptyState v-else-if="failed" :icon="AlertCircle" variant="error" title="问答日志加载失败">
       <template #action>
         <button class="rounded-md border px-4 py-2 text-sm hover:bg-accent" @click="load">重试</button>
       </template>
@@ -111,7 +109,9 @@ function scoreText(score: number) {
           <TableCell>{{ row.model_name ?? '—' }}</TableCell>
           <TableCell>{{ formatDuration(row.latency_ms) }}</TableCell>
           <TableCell>{{ row.total_tokens ?? '—' }}</TableCell>
-          <TableCell><StatusBadge :status="badgeStatus(row.status)" /></TableCell>
+          <TableCell>
+            <StatusBadge :status="badgeStatus(row.status)" />
+          </TableCell>
         </TableRow>
       </TableBody>
     </Table>
@@ -150,7 +150,8 @@ function scoreText(score: number) {
                       相似度 {{ scoreText(s.similarity_score) }}
                     </p>
                   </div>
-                  <span class="shrink-0 rounded bg-accent px-1 text-xs text-accent-foreground">{{ s.source_order }}</span>
+                  <span class="shrink-0 rounded bg-accent px-1 text-xs text-accent-foreground">{{ s.source_order
+                    }}</span>
                 </div>
                 <p class="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">{{ s.content }}</p>
               </div>
@@ -169,7 +170,8 @@ function scoreText(score: number) {
             </div>
             <div class="border-t pt-2">
               <p class="mb-1 font-medium">RAG 参数</p>
-              <p class="text-muted-foreground">top_k={{ detail.rag.candidate_top_k }}/{{ detail.rag.final_top_k }},阈值={{ detail.rag.similarity_threshold }}</p>
+              <p class="text-muted-foreground">top_k={{ detail.rag.candidate_top_k }}/{{ detail.rag.final_top_k }},阈值={{
+                detail.rag.similarity_threshold }}</p>
             </div>
             <div class="border-t pt-2">
               <p class="mb-1 font-medium">耗时</p>
@@ -181,7 +183,9 @@ function scoreText(score: number) {
             </div>
             <div class="border-t pt-2">
               <p class="mb-1 font-medium">Token</p>
-              <p class="text-muted-foreground">输入 {{ detail.tokens.prompt ?? 0 }} + 输出 {{ detail.tokens.completion ?? 0 }} = 共 {{ detail.tokens.total ?? 0 }}</p>
+              <p class="text-muted-foreground">输入 {{ detail.tokens.prompt ?? 0 }} + 输出 {{ detail.tokens.completion ?? 0
+                }} =
+                共 {{ detail.tokens.total ?? 0 }}</p>
             </div>
             <p v-if="detail.error_message" class="border-t pt-2 text-destructive">错误:{{ detail.error_message }}</p>
           </div>

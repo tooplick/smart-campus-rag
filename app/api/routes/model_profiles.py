@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
+import httpx
 
 from app.api.deps import get_current_admin
 from app.core.app_config import MODEL_TYPES, AppConfigError, AppConfigStore, get_app_config
@@ -34,6 +35,11 @@ class ProfileUpdate(BaseModel):
 class ActivePayload(BaseModel):
     type: str
     name: str | None = None
+
+
+class ListModelsRequest(BaseModel):
+    base_url: str = Field(min_length=1)
+    api_key: str = ""
 
 
 def _view(store: AppConfigStore, model_type: str) -> dict:
@@ -132,3 +138,45 @@ async def set_active_profile(
         return success_response(data=_view(store, req.type), message="已切换")
     except AppConfigError as e:
         return error_response(str(e), status_code=422, code="APP_CONFIG_ERROR")
+
+
+@router.post("/list-models")
+async def list_remote_models(
+    req: ListModelsRequest,
+    admin: Admin = Depends(get_current_admin),
+):
+    """用临时 base_url/api_key 调 {base_url}/v1/models,供新建配置时下拉选择模型名。"""
+    base_url = req.base_url.strip().rstrip("/")
+    if not base_url.startswith(("http://", "https://")):
+        return error_response("Base URL 需以 http:// 或 https:// 开头", status_code=422, code="INVALID_BASE_URL")
+    if not base_url.endswith("/v1"):
+        base_url = f"{base_url}/v1"
+    headers = {"Authorization": f"Bearer {req.api_key.strip()}"} if req.api_key.strip() else {}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"{base_url}/models", headers=headers)
+    except httpx.HTTPError as e:
+        return error_response(
+            f"无法连接模型服务:{str(e)[:120]},请检查 base_url 是否正确、服务是否已启动",
+            status_code=502,
+            code="MODEL_CONNECT_ERROR",
+        )
+    if resp.status_code in (401, 403):
+        return error_response(
+            f"鉴权失败(HTTP {resp.status_code}):API Key 无效或无权限,请填写正确的 API Key",
+            status_code=401,
+            code="MODEL_AUTH_ERROR",
+        )
+    if resp.status_code >= 400:
+        return error_response(
+            f"模型服务返回 HTTP {resp.status_code},请检查 base_url 是否正确",
+            status_code=502,
+            code="MODEL_HTTP_ERROR",
+        )
+    try:
+        body = resp.json()
+        data = body.get("data", []) if isinstance(body, dict) else []
+        models = [m["id"] for m in data if isinstance(m, dict) and isinstance(m.get("id"), str)]
+    except Exception:
+        return error_response("模型服务响应不是有效的模型列表 JSON", status_code=502, code="MODEL_HTTP_ERROR")
+    return success_response(data={"models": models})

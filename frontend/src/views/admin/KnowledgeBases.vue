@@ -26,10 +26,11 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
-const error = ref('')
+// 失败仅驱动「通用错误态 + 重试」,具体原因走顶部居中 toast
+const failed = ref(false)
 // 骨架仅在首屏显示,动作后的重载保持表格稳定(防整表闪烁)
 const hasLoaded = ref(false)
-const showSkeleton = computed(() => loading.value && !hasLoaded.value && !error.value)
+const showSkeleton = computed(() => loading.value && !hasLoaded.value && !failed.value)
 
 const dialogOpen = ref(false)
 const editing = ref<KnowledgeBase | null>(null)
@@ -41,13 +42,14 @@ const togglingId = ref<number | null>(null)
 /** 加载当前页知识库列表 */
 async function load() {
   loading.value = true
-  error.value = ''
+  failed.value = false
   try {
     const paged = await kbApi.listKnowledgeBases(page.value, pageSize)
     items.value = paged.items
     total.value = paged.total
   } catch (e) {
-    error.value = errorMessage(e)
+    failed.value = true
+    toast.error(errorMessage(e))
   } finally {
     loading.value = false
     hasLoaded.value = true
@@ -126,16 +128,14 @@ function gotoDocuments(row: KnowledgeBase) {
   <div class="space-y-4">
     <div class="flex items-center justify-between">
       <h1 class="text-xl font-semibold">知识库管理</h1>
-      <Button @click="openCreate"><Plus class="mr-1 h-4 w-4" /> 新建知识库</Button>
+      <Button @click="openCreate">
+        <Plus class="mr-1 h-4 w-4" /> 新建知识库
+      </Button>
     </div>
 
     <TableSkeleton v-if="showSkeleton" :rows="5" :cols="7" />
 
-    <EmptyState
-      v-else-if="error"
-      :icon="AlertCircle" variant="error"
-      title="知识库加载失败" :description="error"
-    >
+    <EmptyState v-else-if="failed" :icon="AlertCircle" variant="error" title="知识库加载失败">
       <template #action>
         <button class="rounded-md border px-4 py-2 text-sm hover:bg-accent" @click="load">重试</button>
       </template>
@@ -163,18 +163,21 @@ function gotoDocuments(row: KnowledgeBase) {
           <TableCell>{{ row.document_count }}</TableCell>
           <TableCell>{{ row.chunk_count }}</TableCell>
           <TableCell>
-            <Switch
-              :model-value="row.is_enabled"
-              :disabled="togglingId === row.id"
-              @update:model-value="(v) => onToggleEnabled(row, Boolean(v))"
-            />
+            <Switch :model-value="row.is_enabled" :disabled="togglingId === row.id"
+              @update:model-value="(v) => onToggleEnabled(row, Boolean(v))" />
           </TableCell>
           <TableCell>{{ formatTime(row.updated_at) }}</TableCell>
           <TableCell class="text-right">
             <div class="flex justify-end gap-1">
-              <Button variant="ghost" size="icon" title="查看文档" @click="gotoDocuments(row)"><FileText class="h-4 w-4" /></Button>
-              <Button variant="ghost" size="icon" title="编辑" @click="openEdit(row)"><Pencil class="h-4 w-4" /></Button>
-              <Button variant="ghost" size="icon" title="删除" @click="askDelete(row)"><Trash2 class="h-4 w-4" /></Button>
+              <Button variant="ghost" size="icon" title="查看文档" @click="gotoDocuments(row)">
+                <FileText class="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" title="编辑" @click="openEdit(row)">
+                <Pencil class="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" title="删除" @click="askDelete(row)">
+                <Trash2 class="h-4 w-4" />
+              </Button>
             </div>
           </TableCell>
         </TableRow>
@@ -186,7 +189,6 @@ function gotoDocuments(row: KnowledgeBase) {
 
     <KbFormDialog v-model:open="dialogOpen" :editing="editing" @save="onSave" />
     <ConfirmDialog v-model:open="confirmOpen" title="删除知识库"
-      :description="`确认删除「${deleteTarget?.name}」?其下所有文档与向量将一并删除,不可恢复。`"
-      @confirm="onConfirmDelete" />
+      :description="`确认删除「${deleteTarget?.name}」?其下所有文档与向量将一并删除,不可恢复。`" @confirm="onConfirmDelete" />
   </div>
 </template>

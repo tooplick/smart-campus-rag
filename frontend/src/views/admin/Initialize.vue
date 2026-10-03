@@ -38,7 +38,11 @@ const confirmError = computed(() => {
 /** 首次初始化:全部字段校验通过后提交并进入仪表盘 */
 async function submit() {
   touched.current = touched.next = touched.confirm = true
-  if (currentError.value || newError.value || confirmError.value) return
+  // 校验不通过:首条错误顶部居中 toast 弹出(字段行内红字同步标出)
+  if (currentError.value || newError.value || confirmError.value) {
+    toast.error(currentError.value || newError.value || confirmError.value)
+    return
+  }
   loading.value = true
   try {
     await auth.initialize(username.value, currentPassword.value, newPassword.value)

@@ -7,6 +7,7 @@ from typing import AsyncIterator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.rag.config import RAGConfig
+from app.rag.errors import RAGStageError
 from app.rag.models.blocks import RagAnswer, RetrievalResult, Usage
 from app.rag.embedding.openai_compatible import OpenAICompatibleEmbedding
 from app.rag.llm.openai_compatible import OpenAICompatibleLLM
@@ -47,8 +48,11 @@ class RAGPipeline:
     ) -> RagAnswer | tuple[RagAnswer, AsyncIterator[str]]:
         start = time.monotonic()
 
-        # 1. Embed question
-        q_vectors = await self.embedding.embed([question])
+        # 1. Embed question(失败标记 embedding 阶段,上层据此细化模型配置报错)
+        try:
+            q_vectors = await self.embedding.embed([question])
+        except Exception as e:  # noqa: BLE001 — 统一转阶段异常
+            raise RAGStageError("embedding", e) from e
         q_vector = q_vectors[0]
 
         # 2. Retrieve:向量 + 关键词两路召回(对齐 RAGFlow 混合检索)
@@ -122,18 +126,24 @@ class RAGPipeline:
                 similarity_threshold=self.config.similarity_threshold,
             )
             llm_start = time.monotonic()
-            stream_iter = await self.llm.chat(
-                messages,
-                stream=True,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-            )
+            try:
+                stream_iter = await self.llm.chat(
+                    messages,
+                    stream=True,
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens,
+                )
+            except Exception as e:  # noqa: BLE001 — 统一转阶段异常
+                raise RAGStageError("llm", e) from e
             # Return a wrapper that builds the final answer
             async def _stream_with_citations():
                 full_answer = []
-                async for token in stream_iter:
-                    full_answer.append(token)
-                    yield token
+                try:
+                    async for token in stream_iter:
+                        full_answer.append(token)
+                        yield token
+                except Exception as e:  # noqa: BLE001 — 流中失败同样标记 llm 阶段
+                    raise RAGStageError("llm", e) from e
                 rag_answer.answer = "".join(full_answer)
                 rag_answer.citations = await build_citations(db, results)
                 rag_answer.llm_latency_ms = int((time.monotonic() - llm_start) * 1000)
@@ -143,12 +153,15 @@ class RAGPipeline:
 
         # Non-streaming
         llm_start = time.monotonic()
-        resp = await self.llm.chat(
-            messages,
-            stream=False,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-        )
+        try:
+            resp = await self.llm.chat(
+                messages,
+                stream=False,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+            )
+        except Exception as e:  # noqa: BLE001 — 统一转阶段异常
+            raise RAGStageError("llm", e) from e
 
         answer_text = resp["choices"][0]["message"]["content"]
         usage_data = resp.get("usage", {})

@@ -35,11 +35,12 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
-const error = ref('')
+// 失败仅驱动「通用错误态 + 重试」,具体原因走顶部居中 toast
+const failed = ref(false)
 // 首屏数据是否已到达:骨架仅在首屏显示,轮询刷新保持表格稳定
 // (否则每 2 秒整表被骨架替换再换回,视觉上就是闪烁)
 const hasLoaded = ref(false)
-const showSkeleton = computed(() => loading.value && !hasLoaded.value && !error.value)
+const showSkeleton = computed(() => loading.value && !hasLoaded.value && !failed.value)
 
 const uploadOpen = ref(false)
 const deleteTarget = ref<DocFile | null>(null)
@@ -49,10 +50,10 @@ const deleting = ref(false)
 let timer: number | null = null
 const polling = computed(() => timer !== null)
 
-/** 加载当前页文档列表 */
-async function load() {
+/** 加载当前页文档列表;silent 供轮询刷新:失败不弹提示、不切错误态,保留当前表格 */
+async function load(opts?: { silent?: boolean }) {
   loading.value = true
-  error.value = ''
+  failed.value = false
   try {
     const paged = await listDocuments({
       knowledge_base_id: kbId.value ?? undefined,
@@ -62,7 +63,10 @@ async function load() {
     items.value = paged.items
     total.value = paged.total
   } catch (e) {
-    error.value = errorMessage(e)
+    // 轮询失败静默:避免每 2 秒弹一次 toast
+    if (opts?.silent) return
+    failed.value = true
+    toast.error(errorMessage(e))
   } finally {
     loading.value = false
     hasLoaded.value = true
@@ -74,11 +78,11 @@ function schedulePoll() {
   if (timer) window.clearTimeout(timer)
   timer = null
   const hasActive = items.value.some((d) => d.status === 'pending' || d.status === 'processing')
-  if (hasActive) timer = window.setTimeout(async () => { await load(); schedulePoll() }, 2000)
+  if (hasActive) timer = window.setTimeout(async () => { await load({ silent: true }); schedulePoll() }, 2000)
 }
 
 onMounted(async () => {
-  await knowledge.load().catch(() => {})
+  await knowledge.load().catch(() => { })
   await load()
   schedulePoll()
 })
@@ -176,13 +180,9 @@ async function onConfirmDelete() {
 
     <TableSkeleton v-if="showSkeleton" :rows="5" :cols="7" />
 
-    <EmptyState
-      v-else-if="error"
-      :icon="AlertCircle" variant="error"
-      title="文档列表加载失败" :description="error"
-    >
+    <EmptyState v-else-if="failed" :icon="AlertCircle" variant="error" title="文档列表加载失败">
       <template #action>
-        <button class="rounded-md border px-4 py-2 text-sm hover:bg-accent" @click="load">重试</button>
+        <button class="rounded-md border px-4 py-2 text-sm hover:bg-accent" @click="() => load()">重试</button>
       </template>
     </EmptyState>
 
@@ -206,7 +206,8 @@ async function onConfirmDelete() {
           <TableCell>
             <StatusBadge :status="row.status" />
             <!-- 错误信息超宽截断,悬浮 title 查看完整内容 -->
-            <p v-if="row.error_message" class="mt-1 max-w-48 truncate text-xs text-destructive" :title="row.error_message">
+            <p v-if="row.error_message" class="mt-1 max-w-48 truncate text-xs text-destructive"
+              :title="row.error_message">
               {{ row.error_message }}
             </p>
           </TableCell>
@@ -218,7 +219,8 @@ async function onConfirmDelete() {
                 <div class="h-2 rounded bg-primary transition-[width] duration-700 ease-out"
                   :style="{ width: progressWidth(row) }" />
               </div>
-              <span class="text-xs text-muted-foreground">{{ row.status === 'pending' ? '排队中' : progressText(row) }}</span>
+              <span class="text-xs text-muted-foreground">{{ row.status === 'pending' ? '排队中' : progressText(row)
+              }}</span>
             </div>
             <span v-else class="text-xs text-muted-foreground">{{ row.status === 'completed' ? '100%' : '—' }}</span>
           </TableCell>
@@ -226,13 +228,18 @@ async function onConfirmDelete() {
           <TableCell class="text-right">
             <div class="flex justify-end gap-1">
               <Button v-if="row.status === 'failed' || row.status === 'completed'" variant="ghost" size="icon"
-                title="重新处理" @click="onReprocess(row)"><RotateCcw class="h-4 w-4" /></Button>
+                title="重新处理" @click="onReprocess(row)">
+                <RotateCcw class="h-4 w-4" />
+              </Button>
               <!-- 取消仅处理中可用(后端对非 processing 取消返回 409) -->
-              <Button v-if="row.status === 'processing'" variant="ghost" size="icon"
-                title="取消处理" @click="onCancel(row)"><X class="h-4 w-4" /></Button>
+              <Button v-if="row.status === 'processing'" variant="ghost" size="icon" title="取消处理"
+                @click="onCancel(row)">
+                <X class="h-4 w-4" />
+              </Button>
               <Button variant="ghost" size="icon" :disabled="cannotDelete(row)"
-                :title="cannotDelete(row) ? '处理中不可删除,请先取消' : '删除'"
-                @click="askDelete(row)"><Trash2 class="h-4 w-4" /></Button>
+                :title="cannotDelete(row) ? '处理中不可删除,请先取消' : '删除'" @click="askDelete(row)">
+                <Trash2 class="h-4 w-4" />
+              </Button>
             </div>
           </TableCell>
         </TableRow>
@@ -244,7 +251,6 @@ async function onConfirmDelete() {
 
     <UploadDialog v-model:open="uploadOpen" :knowledge-base-id="kbId" @uploaded="load().then(schedulePoll)" />
     <ConfirmDialog v-model:open="confirmOpen" title="删除文档"
-      :description="`确认删除「${deleteTarget?.filename}」?关联切片与向量将一并删除。`"
-      @confirm="onConfirmDelete" />
+      :description="`确认删除「${deleteTarget?.filename}」?关联切片与向量将一并删除。`" @confirm="onConfirmDelete" />
   </div>
 </template>

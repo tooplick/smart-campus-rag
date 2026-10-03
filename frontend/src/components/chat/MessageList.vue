@@ -5,6 +5,7 @@ import UserMessage from './UserMessage.vue'
 import AssistantMessage from './AssistantMessage.vue'
 
 const props = defineProps<{ messages: UiMessage[] }>()
+const emit = defineEmits<{ retry: [] }>()
 const root = ref<HTMLElement>()
 
 watch(
@@ -22,7 +23,7 @@ watch(
     <div class="mx-auto w-full max-w-[800px] space-y-6">
       <template v-for="(m, i) in messages" :key="i">
         <UserMessage v-if="m.role === 'user'" :content="m.content" />
-        <AssistantMessage v-else :message="m" />
+        <AssistantMessage v-else :message="m" @retry="emit('retry')" />
       </template>
     </div>
   </div>
