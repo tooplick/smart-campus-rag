@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -68,8 +69,43 @@ def test_null_and_empty_body_are_noops():
         assert live.chunk_size == 800
 
 
+def test_runtime_params_persist_and_sync_instances():
+    """运行参数:合法值落盘+热更 RAGConfig+同步 Provider 实例属性;越界 422。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        c, live = _client(tmp)
+        # 挂上模拟的运行中 Provider(构造时快照的实例属性)
+        embedding = SimpleNamespace(batch_size=32, max_retries=3, timeout=120.0)
+        llm = SimpleNamespace(max_retries=3, timeout=120.0)
+        c.app.state.rag_pipeline = SimpleNamespace(embedding=embedding, llm=llm)
+
+        r = c.put("/api/admin/rag-config", json={
+            "embedding_batch_size": 64, "embedding_max_retries": 5,
+            "llm_max_retries": 2, "request_timeout": 300,
+        })
+        assert r.json()["success"], r.text
+        # 落盘 + RAGConfig 热更
+        assert live.embedding_batch_size == 64 and live.request_timeout == 300
+        assert c.get("/api/admin/rag-config").json()["data"]["embedding_batch_size"] == 64
+        # 实例属性同步(否则改了不生效)
+        assert embedding.batch_size == 64 and embedding.max_retries == 5 and embedding.timeout == 300
+        assert llm.max_retries == 2 and llm.timeout == 300
+        # embedding 参数不得误写到 llm 实例
+        assert not hasattr(llm, "batch_size")
+
+        # 越界一律 422 且不落盘
+        for bad in ({"embedding_batch_size": 0}, {"llm_max_retries": 11},
+                    {"request_timeout": 601}, {"embedding_max_retries": -1}):
+            r = c.put("/api/admin/rag-config", json=bad)
+            assert r.status_code == 422, (bad, r.text)
+        assert c.get("/api/admin/rag-config").json()["data"]["embedding_batch_size"] == 64
+
+
 def main() -> int:
-    tests = [test_get_defaults_put_persists_and_hot_updates, test_null_and_empty_body_are_noops]
+    tests = [
+        test_get_defaults_put_persists_and_hot_updates,
+        test_null_and_empty_body_are_noops,
+        test_runtime_params_persist_and_sync_instances,
+    ]
     failed = 0
     for test in tests:
         try:

@@ -120,6 +120,15 @@ async def update_rag_config(
         return error_response("temperature 必须在 0~2 之间", status_code=422, code="INVALID_TEMPERATURE")
     if req.max_tokens is not None and not (64 <= req.max_tokens <= 8192):
         return error_response("max_tokens 必须在 64~8192 之间", status_code=422, code="INVALID_MAX_TOKENS")
+    # 可选运行参数
+    if req.embedding_batch_size is not None and not (1 <= req.embedding_batch_size <= 1024):
+        return error_response("embedding_batch_size 必须在 1~1024 之间", status_code=422, code="INVALID_BATCH_SIZE")
+    if req.embedding_max_retries is not None and not (0 <= req.embedding_max_retries <= 10):
+        return error_response("embedding_max_retries 必须在 0~10 之间", status_code=422, code="INVALID_EMBED_RETRIES")
+    if req.llm_max_retries is not None and not (0 <= req.llm_max_retries <= 10):
+        return error_response("llm_max_retries 必须在 0~10 之间", status_code=422, code="INVALID_LLM_RETRIES")
+    if req.request_timeout is not None and not (1 <= req.request_timeout <= 600):
+        return error_response("request_timeout 必须在 1~600 秒之间", status_code=422, code="INVALID_REQUEST_TIMEOUT")
 
     # exclude_none:显式 null(如 {"chunk_size": null})不得绕过上面的范围校验污染运行中配置
     updates = req.model_dump(exclude_unset=True, exclude_none=True)
@@ -134,7 +143,32 @@ async def update_rag_config(
     if live is not None:
         for key, value in updates.items():
             setattr(live, key, value)
+        # 这 4 个运行参数在 Provider 构造时已快照为实例属性,仅 setattr RAGConfig 不生效,
+        # 需同步到运行中实例(config 留作下次构造新实例用)
+        _apply_runtime_params(request.app, updates)
     return success_response(data=saved)
+
+
+def _apply_runtime_params(app, updates: dict) -> None:
+    """把运行参数同步到运行中 Provider 实例(构造时快照,改 config 不足以热更新)。"""
+    pipeline = getattr(app.state, "rag_pipeline", None)
+    worker = getattr(app.state, "document_worker", None)
+    # embedding/llm 实例在 lifespan 中由 pipeline 与 worker 共享,取到一份即可
+    embedding = getattr(pipeline, "embedding", None) or getattr(worker, "embedding", None)
+    llm = getattr(pipeline, "llm", None) or getattr(worker, "llm", None)
+
+    if embedding is not None:
+        if "embedding_batch_size" in updates:
+            embedding.batch_size = updates["embedding_batch_size"]
+        if "embedding_max_retries" in updates:
+            embedding.max_retries = updates["embedding_max_retries"]
+        if "request_timeout" in updates:
+            embedding.timeout = updates["request_timeout"]
+    if llm is not None:
+        if "llm_max_retries" in updates:
+            llm.max_retries = updates["llm_max_retries"]
+        if "request_timeout" in updates:
+            llm.timeout = updates["request_timeout"]
 
 
 # 旧 GET/PUT /models(/{type}) 兼容端点已下线(前端设置页改用 /model-profiles CRUD);

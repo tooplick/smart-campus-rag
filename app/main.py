@@ -67,11 +67,15 @@ async def lifespan(app: FastAPI):
             api_key=embedding_cfg["api_key"],
             model=embedding_cfg["model"],
             batch_size=rag_config.embedding_batch_size,
+            max_retries=rag_config.embedding_max_retries,
+            timeout=rag_config.request_timeout,
         )
         llm = OpenAICompatibleLLM(
             base_url=llm_cfg["base_url"],
             api_key=llm_cfg["api_key"],
             model=llm_cfg["model"],
+            max_retries=rag_config.llm_max_retries,
+            timeout=rag_config.request_timeout,
         )
 
         qdrant = AsyncQdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY or None)

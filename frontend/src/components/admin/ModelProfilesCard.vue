@@ -241,7 +241,7 @@ watch(() => props.group, () => { confirmOpen.value = false })
                     <div class="space-y-1">
                         <Label for="pf-name">配置名称</Label>
                         <Input id="pf-name" v-model="form.name" :disabled="Boolean(editingName)"
-                            placeholder="如 default、mimo" @blur="touched = true" />
+                            placeholder="如 default、backup" @blur="touched = true" />
                         <p v-if="touched && nameError" class="text-xs text-destructive">{{ nameError }}</p>
                         <p v-else-if="editingName" class="text-xs text-muted-foreground">名称即标识,不可修改</p>
                     </div>

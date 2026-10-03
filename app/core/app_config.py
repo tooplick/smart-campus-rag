@@ -17,6 +17,7 @@ MODEL_TYPES = ("llm", "embedding", "vision", "rerank")
 PROFILE_FIELDS = ("base_url", "api_key", "model")
 
 # 与 RAGConfig 默认值一致;文件缺项回退此处
+# 注意 request_timeout 必须写 float(60.0):_coerce_rag_value 按此值类型强转
 RAG_DEFAULTS: dict[str, int | float] = {
     "chunk_size": 600,
     "chunk_overlap": 80,
@@ -28,6 +29,11 @@ RAG_DEFAULTS: dict[str, int | float] = {
     "auto_questions": 2,
     "temperature": 0.2,
     "max_tokens": 2048,
+    # 可选运行参数(设置页「运行参数」区可改,保存即热更新)
+    "embedding_batch_size": 32,
+    "embedding_max_retries": 3,
+    "llm_max_retries": 3,
+    "request_timeout": 120.0,
 }
 
 

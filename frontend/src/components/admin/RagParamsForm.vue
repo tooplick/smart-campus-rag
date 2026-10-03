@@ -20,6 +20,8 @@ const form = reactive({
     candidate_top_k: 8, final_top_k: 5, similarity_threshold: 0.6,
     vector_weight: 0.7, auto_keywords: 5, auto_questions: 2,
     temperature: 0.2, max_tokens: 2048,
+    embedding_batch_size: 32, embedding_max_retries: 3,
+    llm_max_retries: 3, request_timeout: 120,
 })
 const loading = ref(true)
 const loadError = ref('')
@@ -39,6 +41,14 @@ const fields = [
     { key: 'max_tokens', label: 'Max Tokens(生成长度)', hint: '单次回答的最大生成长度,范围 64~8192', step: 64 },
 ] as const
 
+/** 可选运行参数:调用次数/批量相关,默认值即开箱即用,一般无需改动 */
+const runtimeFields = [
+    { key: 'embedding_batch_size', label: 'Embedding Batch Size', hint: '单批向量化条数,范围 1~1024;调大可加快入库,过大会撑爆模型上下文', step: 1 },
+    { key: 'embedding_max_retries', label: 'Embedding 重试次数', hint: 'Embedding 请求失败后的重试次数,范围 0~10', step: 1 },
+    { key: 'llm_max_retries', label: 'LLM 重试次数', hint: 'LLM 请求失败后的重试次数,范围 0~10', step: 1 },
+    { key: 'request_timeout', label: '请求超时(秒)', hint: 'LLM/Embedding 单次请求超时,范围 1~600;慢模型或大批量入库可调大', step: 10 },
+] as const
+
 // store 中的配置到达后回填表单
 watch(() => admin.ragConfig, (c) => {
     if (!c) return
@@ -52,6 +62,10 @@ watch(() => admin.ragConfig, (c) => {
     form.auto_questions = c.auto_questions
     form.temperature = c.temperature
     form.max_tokens = c.max_tokens
+    form.embedding_batch_size = c.embedding_batch_size
+    form.embedding_max_retries = c.embedding_max_retries
+    form.llm_max_retries = c.llm_max_retries
+    form.request_timeout = c.request_timeout
 }, { immediate: true })
 
 async function load() {
@@ -81,6 +95,10 @@ const errors = computed(() => {
     if (form.auto_questions < 0 || form.auto_questions > 10) e.auto_questions = 'Auto Questions 需在 0~10 之间'
     if (form.temperature < 0 || form.temperature > 2) e.temperature = 'Temperature 需在 0~2 之间'
     if (form.max_tokens < 64 || form.max_tokens > 8192) e.max_tokens = 'Max Tokens 需在 64~8192 之间'
+    if (form.embedding_batch_size < 1 || form.embedding_batch_size > 1024) e.embedding_batch_size = 'Embedding Batch Size 需在 1~1024 之间'
+    if (form.embedding_max_retries < 0 || form.embedding_max_retries > 10) e.embedding_max_retries = 'Embedding 重试次数需在 0~10 之间'
+    if (form.llm_max_retries < 0 || form.llm_max_retries > 10) e.llm_max_retries = 'LLM 重试次数需在 0~10 之间'
+    if (form.request_timeout < 1 || form.request_timeout > 600) e.request_timeout = '请求超时需在 1~600 秒之间'
     return e
 })
 const hasError = computed(() => Object.keys(errors.value).length > 0)
@@ -120,7 +138,7 @@ async function save() {
             </template>
         </EmptyState>
 
-        <div v-else class="space-y-4 rounded-lg border bg-background p-6">
+        <div v-else class="space-y-6 rounded-lg border bg-background p-6">
             <div class="grid gap-4 sm:grid-cols-2">
                 <div v-for="f in fields" :key="f.key" class="space-y-1">
                     <Label :for="f.key">{{ f.label }}</Label>
@@ -131,6 +149,24 @@ async function save() {
                     <p v-else class="min-h-4 text-xs text-muted-foreground">{{ f.hint }}</p>
                 </div>
             </div>
+
+            <!-- 可选运行参数:与常规参数分组,避免淹没主表单 -->
+            <div class="space-y-3 border-t pt-4">
+                <div>
+                    <h3 class="text-sm font-medium">运行参数(可选)</h3>
+                    <p class="text-xs text-muted-foreground">批量、重试与超时;默认值开箱即用,无需改动</p>
+                </div>
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <div v-for="f in runtimeFields" :key="f.key" class="space-y-1">
+                        <Label :for="f.key">{{ f.label }}</Label>
+                        <Input :id="f.key" v-model.number="form[f.key]" type="number" :step="f.step"
+                            :aria-invalid="Boolean(errors[f.key])" />
+                        <p v-if="errors[f.key]" class="min-h-4 text-xs text-destructive">{{ errors[f.key] }}</p>
+                        <p v-else class="min-h-4 text-xs text-muted-foreground">{{ f.hint }}</p>
+                    </div>
+                </div>
+            </div>
+
             <Button :disabled="saving || hasError" @click="save">
                 <Loader2 v-if="saving" class="mr-1 h-4 w-4 animate-spin" />
                 {{ saving ? '保存中…' : '保存配置' }}

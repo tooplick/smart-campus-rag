@@ -30,6 +30,7 @@
 | Vector Weight | 混合检索中向量路权重,调低偏关键词、调高偏语义 |
 | Auto Keywords / Questions | 入库增强生成的关键词与候选问题数,0 = 关闭 |
 | Temperature / Max Tokens | 生成随机性与最大长度 |
+| Embedding Batch Size / 重试 / 超时(可选) | 运行参数:`embedding_batch_size`(默认 32)、`embedding_max_retries`、`llm_max_retries`(默认 3)、`request_timeout`(默认 120 秒);设置页「运行参数」区可改,保存即生效 |
 
 所有参数保存即热更新到运行中的管线,无需重启。
 

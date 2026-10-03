@@ -52,6 +52,8 @@ def apply_model_change(app: FastAPI, model_type: str, store: AppConfigStore) -> 
             api_key=profile["api_key"],
             model=profile["model"],
             batch_size=getattr(rag_config, "embedding_batch_size", 32),
+            max_retries=getattr(rag_config, "embedding_max_retries", 3),
+            timeout=getattr(rag_config, "request_timeout", 120.0),
         )
         if pipeline is not None:
             pipeline.embedding = embedding
@@ -62,6 +64,8 @@ def apply_model_change(app: FastAPI, model_type: str, store: AppConfigStore) -> 
             base_url=profile["base_url"],
             api_key=profile["api_key"],
             model=profile["model"],
+            max_retries=getattr(rag_config, "llm_max_retries", 3),
+            timeout=getattr(rag_config, "request_timeout", 120.0),
         )
         if pipeline is not None:
             pipeline.llm = llm

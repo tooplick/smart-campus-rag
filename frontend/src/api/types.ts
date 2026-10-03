@@ -107,6 +107,11 @@ export interface RagConfig {
   auto_questions: number
   temperature: number
   max_tokens: number
+  /** 以下为可选运行参数(设置页「运行参数」区) */
+  embedding_batch_size: number
+  embedding_max_retries: number
+  llm_max_retries: number
+  request_timeout: number
 }
 
 /** 模型连通性测试结果 */

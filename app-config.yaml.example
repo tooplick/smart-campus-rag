@@ -3,25 +3,33 @@
 # api_key 明文落盘,注意文件权限
 models:
   llm:
-    active: mimo              # 当前启用的配置名;null = 停用(rerank/vision 可停用)
+    active: default            # 当前启用的配置名;null = 停用(rerank/vision 可停用)
     profiles:
-      mimo:
-        base_url: https://token-plan-cn.xiaomimimo.com
-        api_key: "sk-xxx"
-        model: mimo-v2.6-flash
+      default:
+        base_url: https://your-llm.example.com/v1   # 任意 OpenAI 兼容端点
+        api_key: "sk-xxxxxxxx"
+        model: your-llm-model
   embedding:
-    active: bge-local
+    active: default            # 必配:问答与入库都依赖;需输出 1024 维向量
     profiles:
-      bge-local:
-        base_url: http://localhost:8080   # 本地 llama.cpp bge-m3,见 scripts/start-embedding-server.ps1
-        api_key: "-"
+      default:
+        base_url: https://your-embedding.example.com/v1   # 本机 llama.cpp 可用 http://localhost:8080
+        api_key: "sk-xxxxxxxx"
         model: bge-m3
   rerank:
-    active: null
-    profiles: {}
+    active: null               # 可选:不启用重排保持 null;启用后填下方配置名
+    profiles:
+      bge-reranker:            # 示例结构,不启用不生效;可整段删除
+        base_url: https://your-rerank.example.com/v1
+        api_key: "sk-xxxxxxxx"
+        model: bge-reranker-v2-m3
   vision:
-    active: null
-    profiles: {}
+    active: null               # 可选:不识别图片文档保持 null
+    profiles:
+      qwen-vl:                 # 示例结构,不启用不生效;可整段删除
+        base_url: https://your-vision.example.com/v1
+        api_key: "sk-xxxxxxxx"
+        model: qwen-vl-plus
 rag:
   chunk_size: 600
   chunk_overlap: 80
@@ -33,3 +41,8 @@ rag:
   auto_questions: 2
   temperature: 0.2
   max_tokens: 2048
+  # ---- 以下均可选:不填即用默认值;设置页「运行参数」区可改,保存即生效 ----
+  embedding_batch_size: 32    # 单批向量化条数,默认 32;调大可加快入库,过大会撑爆模型上下文
+  embedding_max_retries: 3    # Embedding 请求失败重试次数,默认 3
+  llm_max_retries: 3          # LLM 请求失败重试次数,默认 3
+  request_timeout: 120.0      # LLM/Embedding 请求超时秒数,默认 120;慢模型/大批量入库可调大

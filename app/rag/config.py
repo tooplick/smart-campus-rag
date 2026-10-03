@@ -16,7 +16,8 @@ class RAGConfig:
     embedding_batch_size: int = 32
     embedding_max_retries: int = 3
     llm_max_retries: int = 3
-    request_timeout: float = 60.0
+    # LLM/Embedding 共用请求超时;默认 120 沿用 OpenAICompatibleLLM 原硬编码值,避免收紧行为
+    request_timeout: float = 120.0
 
     def to_dict(self) -> dict:
         return {

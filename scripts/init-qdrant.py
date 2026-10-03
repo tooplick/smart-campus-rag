@@ -12,12 +12,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import Distance, VectorParams, PayloadSchemaType
 
+from app.core.config import get_settings
+
 COLLECTION_NAME = "campus_rag_chunks_v1"
 VECTOR_DIMENSION = 1024  # Default for BGE-M3, adjust based on your embedding model
 
 
 async def main():
-    client = AsyncQdrantClient(url="http://localhost:6333")
+    # 从环境配置取地址(开发机 localhost、容器内 http://qdrant:6333 各自生效)
+    settings = get_settings()
+    client = AsyncQdrantClient(
+        url=settings.QDRANT_URL,
+        api_key=settings.QDRANT_API_KEY or None,
+    )
 
     collections = await client.get_collections()
     names = [c.name for c in collections.collections]

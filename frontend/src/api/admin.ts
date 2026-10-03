@@ -20,6 +20,8 @@ export function saveRagConfig(body: {
   candidate_top_k?: number; final_top_k?: number; similarity_threshold?: number
   vector_weight?: number; auto_keywords?: number; auto_questions?: number
   temperature?: number; max_tokens?: number
+  embedding_batch_size?: number; embedding_max_retries?: number
+  llm_max_retries?: number; request_timeout?: number
 }) {
   return request.put<unknown, RagConfig>('/admin/rag-config', body)
 }

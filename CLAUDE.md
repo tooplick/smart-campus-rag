@@ -215,7 +215,7 @@ router/      `/` Home、`/docs`、`/chat`、`/Login`、`/Initialize` 公开;`/Da
 - **Windows 11** + Docker Desktop(postgres/qdrant 容器);Python 3.11,Node.js v24,npm,uv
 - 端口:后端 8001(8000 被系统占用)、前端 5173、Embedding 8080、Qdrant 6333、Postgres 5432
 - `.env` 在项目根目录(不提交,模板见 `.env.example`):DATABASE_URL / QDRANT_URL / JWT_SECRET_KEY / FILE_STORAGE_PATH / APP_CONFIG_PATH(模型与 RAG 配置文件路径,默认 `./app-config.yaml`)等
-- 依赖以 `pyproject.toml` 为准(uv 管理);根目录 `requirements.txt` 为旧钉版遗留
+- 依赖以 `pyproject.toml` + `uv.lock` 为准(uv 管理;Dockerfile 也用 `uv sync --locked` 构建)
 
 ## 设计文档
 
