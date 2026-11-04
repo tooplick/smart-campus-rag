@@ -126,7 +126,8 @@ parser/              dispatch.get_parser() 按扩展名分派:
                      txt·md / pdf(标题检测)/ docx / xlsx / pptx / csv / html / 图片(Vision OCR,需 vision 配置)
 chunker/             chunk_blocks() — 按知识库模板切块(见下)
 embedding|llm|rerank/ OpenAI 兼容 Provider(base_url 可不带 /v1,调用前统一补齐)
-retriever/           qdrant(向量) + keyword(jieba+bigram → ILIKE) + fuse(加权融合) + expand(邻块)
+retriever/           qdrant.py(向量) + keyword.py(jieba+bigram → ILIKE)+ expand.py(邻块)
+                     融合排序在 keyword.py 的 fuse_results/fuse_scores(无独立 fuse 模块)
 enrichment.py        入库增强:auto-keywords / auto-questions
 context|prompt|citation/ [来源 N] 上下文、校园 QA 提示词、回查文档名构建引用
 ```
@@ -235,6 +236,8 @@ router/      `/` Home、`/docs`、`/chat`、`/Login`、`/Initialize` 公开;`/Da
 - `plan/*.py` — 论文构建/绘图/TOC 刷新脚本(python-docx 改 XML + win32com 调 Word);`plan/progress.md` 记录修订进度
 - `thesis_shots/` 原图、`thesis_shots/enhanced/` 高清增强版;`chapters/images/` 矢量图(SVG 内嵌 Word,图 3-1~4-2)
 - 操作 docx 前确认 Word 未打开同名文件,否则保存报 `PermissionError`;根目录大量 `_备份_*.docx` 是历次修订备份(体积大,勿再新增无谓备份)
+
+**本机已装科研写作技能(仅本机,`.claude/` 已在 `.gitignore`):** `.claude/skills/` 下有 19 个技能,来自 `github.com/Norman-bury/research-writing-skill`(MIT,v3.1.0)。入口是 `using-research-writing`,按任务路由到 `brainstorming-research` / `writing-chapters` / `paper-orchestration` / `verification` / `peer-review` / `figures-python` / `figures-diagram` 等;修改论文正文时优先按其流程走(先头脑风暴定结构,再逐章写作 + 两阶段 Review,最后跑验证)。配套资源在 `.claude/skills/_assets/`——技能文档里写的 `scripts/scholar_search.py`、`templates/` 等实际在该目录下。新克隆的仓库没有这些技能,需自行安装或拷贝到 `~/.claude/skills/`。
 
 ## 设计文档
 
