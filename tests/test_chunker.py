@@ -136,6 +136,33 @@ def test_no_duplicate_across_block_boundary():
     scenario()
 
 
+def test_small_doc_fallback_keeps_single_chunk():
+    """全文不足 min_size 的小文档也必须产出至少 1 个切片,不得返回空列表。
+
+    回归:历史上 PPTX 等短内容文档因低于 min_size 被丢弃,
+    空切片列表流入工作线程后触发 Qdrant 空 upsert 400。
+    """
+
+    def scenario() -> None:
+        blocks = [
+            ContentBlock(block_type=BlockType.TEXT, content="新生入学教育。校史校情与校园安全。",
+                         page_number=1, section_title=None, source_index=0),
+        ]
+        # 默认 min_size=50,该内容远低于阈值
+        chunks = chunk_blocks(blocks, document_id=1, knowledge_base_id=1,
+                              target_size=600, overlap=80, template="general")
+        assert len(chunks) == 1, f"小文档应兜底保留 1 个切片,实际 {len(chunks)} 个"
+        assert "新生入学教育" in chunks[0].content
+
+        # 空内容仍应返回空列表(由工作线程给出可读错误)
+        empty = chunk_blocks([ContentBlock(block_type=BlockType.TEXT, content="",
+                                           page_number=1, section_title=None, source_index=0)],
+                             document_id=1, knowledge_base_id=1, template="general")
+        assert empty == [], f"空内容不应产出切片,实际 {empty}"
+
+    scenario()
+
+
 def main() -> int:
     tests = [
         obj

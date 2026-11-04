@@ -142,7 +142,9 @@ def _chunk_general(
 
     if cross_block and carryover:
         text = "".join(t for t, _, _ in carryover).strip()
-        if text and _estimate_tokens(text) >= min_size:
+        # 兜底:小文档(全文不足 min_size)也必须产出至少 1 个切片,
+        # 否则入库侧会拿到空切片列表(历史上触发过 Qdrant 空 upsert 400)
+        if text and (not chunks or _estimate_tokens(text) >= min_size):
             chunks.append(_make_chunk(
                 text,
                 document_id=document_id,

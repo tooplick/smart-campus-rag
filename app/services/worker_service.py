@@ -112,6 +112,9 @@ class DocumentWorker:
                     overlap=self.config.chunk_overlap,
                     template=template,
                 )
+                if not chunk_data_list:
+                    # 可读错误,避免空切片列表流入向量写入(历史上报 Qdrant 空 upsert 400)
+                    raise ValueError("文档未解析出可入库文本:内容为空或全部低于最小切片长度")
                 await self._update_status(db, doc, "processing", 40)
 
                 # 记录上一代切片 ID:旧内容保持可检索,待新内容就绪后在换代点原子替换
