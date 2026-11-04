@@ -38,6 +38,10 @@ uv run python scripts/init-db.py
 # 增量迁移
 psql -U postgres -d campus_rag -f scripts/migrate-001-add-conversations-and-qa-fields.sql
 psql -U postgres -d campus_rag -f scripts/migrate-002-add-chunk-template.sql
+
+# Docker 启动用的幂等初始化:建表 → Qdrant 集合 → 仅当 admin 表为空时建首个管理员
+# (绝不改动已有管理员;create-admin.py 会重置密码,只用于手工初始化)
+uv run python scripts/bootstrap.py
 ```
 
 ### 测试(独立脚本,不使用 pytest)
@@ -47,7 +51,10 @@ uv run python tests/test_chunker.py     # 任意单个测试文件直接运行,P
 ```
 
 - 每个 `tests/test_*.py` 自带 `__main__` 入口;HTTP 一律 `httpx.MockTransport`,不发真实请求
-- 部分测试通过 `async_session` 连本地 PostgreSQL,运行前先 `docker compose up -d postgres qdrant`
+- 纯逻辑/Mock 类可直接跑;以下 7 个会真连本地 PostgreSQL,运行前先 `docker compose up -d postgres qdrant`:
+  `test_document_delete`、`test_knowledge_delete`、`test_worker_reprocess`、`test_hybrid_retrieval`、
+  `test_neighbor_expansion`、`test_rerank`、`test_enrichment`
+- 没有 pytest 配置、没有 ruff/eslint/prettier —— 不存在 lint 命令,提交前自检靠跑测试 + `npm run build`(vue-tsc 类型检查)
 
 ### 前端(`frontend/`)
 
@@ -163,9 +170,10 @@ context|prompt|citation/ [来源 N] 上下文、校园 QA 提示词、回查文�
 ### 其他路由
 
 - `/api/auth`: login / initialize(首次强制改密)/ me / logout / change-password
-- `/api/knowledge-bases` CRUD;`/api/documents` CRUD + `/{id}/status` + `/{id}/reprocess`
+- `/api/knowledge-bases` CRUD;`/api/documents` CRUD + `/{id}/status` + `/{id}/reprocess` + `/{id}/cancel`(仅 processing 可取消,置回 pending 并清锁)
 - `/api/files/{id}` 下载、`/api/files/{id}/view` 内联预览(公开,聊天来源弹层直出原文件)
-- `/api/admin`(JWT): dashboard / rag-config(读写 `app-config.yaml`)/ model-profiles(多套配置 CRUD + 启用切换)/ models/{type}/test(连通性测试,可选 `{name}` 指定配置;旧 GET/PUT `/models` 已下线)/ qa-logs
+- `/api/admin`(JWT,`routes/admin.py`): dashboard / rag-config(读写 `app-config.yaml`)/ models/{type}/test(连通性测试,可选 `{name}` 指定配置;旧 GET/PUT `/models` 已下线)/ qa-logs(列表 + 单条详情)
+- `/api/admin/model-profiles`(JWT,独立 `routes/model_profiles.py`): 多套 profile 列表/新建/改名改参/删除 + `PUT /active` 启用切换 + `POST /list-models` 拉取远端模型;`api_key` 只回 `api_key_configured` 布尔,修改时留空表示不改
 - `/api/health` 存活、`/api/ready` 就绪(PostgreSQL/Qdrant/LLM/Embedding)
 
 ### 关键模式
@@ -191,16 +199,17 @@ utils/       request.ts(axios + jsonFetch 双轨,错误归一化) sse.ts stream-
              guard.ts(路由守卫纯函数) docs.ts / markdown.ts(Docs 页) sidebar.ts(侧栏折叠持久化)
 stores/      auth.ts chat.ts knowledge.ts admin.ts
 views/       Home.vue(/ 介绍) Docs.vue(/docs 文档) Chat.vue(/chat 通栏对话)
-             admin/{Login,Initialize,Dashboard,KnowledgeBases,Documents,Settings,QaLogs}
+             admin/{Login,Initialize,Dashboard,KnowledgeBases,Documents,QaLogs,Model,Settings}
 components/  shell/(AppShell 壳层 + TopNav 顶栏 + AppSidebar 全局侧栏 + DashboardShell 管理页二级导航)
-             chat/(消息/引用/来源预览/输入框) admin/(模型配置卡/RAG 参数表单/图表)
+             chat/(消息/引用/来源预览/PDF 预览/输入框) admin/(Chart 图表 + ModelSelector + RagParamsForm)
              common/ document/ knowledge/ ui/(shadcn-vue)
              docs/ 内置 Markdown(frontend/src/docs/*.md,import.meta.glob 静态导入)
 router/      `/` Home、`/docs`、`/chat`、`/Login`、`/Initialize` 公开;`/Dashboard` `/KnowledgeBases`
-             `/Documents` `/QaLogs` `/Settings` 管理页(DashboardShell 包裹);兜底重定向 `/`
+             `/Documents` `/QaLogs` `/Settings` 管理页;`/Model` 下再分 `llm|embedding|vision|rerank`
+             四个子路由(空路径重定向 `/Model/llm`);均以 DashboardShell 包裹;兜底重定向 `/`
 ```
 
-**统一壳层:** 所有页面共享 `AppShell`(TopNav 全宽顶栏 + AppSidebar 会话侧栏 + 内容区);顶栏四项导航 Home/Docs/Chat/Dashboard(未登录隐藏 Dashboard),管理页在内容区顶部另有 5 项二级标签。守卫逻辑在 `utils/guard.ts`(纯函数 + vitest)。
+**统一壳层:** 所有页面共享 `AppShell`(TopNav 全宽顶栏 + AppSidebar 会话侧栏 + 内容区);顶栏四项导航 Home/Docs/Chat/Dashboard(未登录隐藏 Dashboard),管理页在内容区顶部另有 6 项二级标签:仪表盘 / 知识库 / 文档 / 问答日志 / 模型 / 设置。守卫逻辑在 `utils/guard.ts`(纯函数 + vitest)。
 
 **两种鉴权模式:**
 - 管理端(`/api/admin`、`/api/knowledge-bases`、`/api/documents`):JWT Bearer,axios 拦截器(`utils/request.ts`),token 存 `localStorage.admin_token`
@@ -216,6 +225,16 @@ router/      `/` Home、`/docs`、`/chat`、`/Login`、`/Initialize` 公开;`/Da
 - 端口:后端 8001(8000 被系统占用)、前端 5173、Embedding 8080、Qdrant 6333、Postgres 5432
 - `.env` 在项目根目录(不提交,模板见 `.env.example`):DATABASE_URL / QDRANT_URL / JWT_SECRET_KEY / FILE_STORAGE_PATH / APP_CONFIG_PATH(模型与 RAG 配置文件路径,默认 `./app-config.yaml`)等
 - 依赖以 `pyproject.toml` + `uv.lock` 为准(uv 管理;Dockerfile 也用 `uv sync --locked` 构建)
+- 根目录 `requirements.txt` 已过期(版本停留在旧版、与 pyproject 不一致),仅供追溯,**不要据它安装**;根 `package.json` 只有 `shadcn` CLI 一个 devDependency,前端依赖一律看 `frontend/package.json`
+
+## 论文相关文件(与代码混放在同一仓库)
+
+根目录 `毕业设计论文_*.docx`、`chapters/`、`plan/`、`thesis_shots/` 是毕业设计论文的产物与素材,不参与应用运行:
+
+- **唯一事实源是 `毕业设计论文_唐星星_最终定稿.docx`**(41 页);`chapters/*.md` 已落后于该 docx,不要据其回写正文
+- `plan/*.py` — 论文构建/绘图/TOC 刷新脚本(python-docx 改 XML + win32com 调 Word);`plan/progress.md` 记录修订进度
+- `thesis_shots/` 原图、`thesis_shots/enhanced/` 高清增强版;`chapters/images/` 矢量图(SVG 内嵌 Word,图 3-1~4-2)
+- 操作 docx 前确认 Word 未打开同名文件,否则保存报 `PermissionError`;根目录大量 `_备份_*.docx` 是历次修订备份(体积大,勿再新增无谓备份)
 
 ## 设计文档
 
